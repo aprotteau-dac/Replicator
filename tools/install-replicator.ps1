@@ -1,6 +1,7 @@
 param(
     [string] $InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\Replicator"),
-    [switch] $NoDesktopShortcut
+    [switch] $NoDesktopShortcut,
+    [switch] $NoShortcuts
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,11 @@ $exeName = "Replicator.App.exe"
 $sourceExe = Join-Path $sourceDir $exeName
 
 if (-not (Test-Path $sourceExe)) {
+    $repoInstall = Resolve-Path (Join-Path $PSScriptRoot "install-dev.ps1") -ErrorAction SilentlyContinue
+    if ($repoInstall) {
+        throw "This installer runs from a published package. From the repo root, use .\tools\install-dev.ps1 to publish and install Replicator."
+    }
+
     throw "Installer must be run from a published Replicator package containing $exeName."
 }
 
@@ -46,21 +52,25 @@ $installedExe = Join-Path $installDirResolved $exeName
 $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Replicator"
 $desktopDir = [Environment]::GetFolderPath("DesktopDirectory")
 
-New-Item -ItemType Directory -Force $startMenuDir | Out-Null
+if (-not $NoShortcuts) {
+    New-Item -ItemType Directory -Force $startMenuDir | Out-Null
 
-New-Shortcut `
-    -ShortcutPath (Join-Path $startMenuDir "Replicator.lnk") `
-    -TargetPath $installedExe `
-    -WorkingDirectory $installDirResolved `
-    -Description "Replicator backup and shuttle control"
-
-if (-not $NoDesktopShortcut) {
     New-Shortcut `
-        -ShortcutPath (Join-Path $desktopDir "Replicator.lnk") `
+        -ShortcutPath (Join-Path $startMenuDir "Replicator.lnk") `
         -TargetPath $installedExe `
         -WorkingDirectory $installDirResolved `
         -Description "Replicator backup and shuttle control"
+
+    if (-not $NoDesktopShortcut) {
+        New-Shortcut `
+            -ShortcutPath (Join-Path $desktopDir "Replicator.lnk") `
+            -TargetPath $installedExe `
+            -WorkingDirectory $installDirResolved `
+            -Description "Replicator backup and shuttle control"
+    }
 }
 
 Write-Host "Replicator installed to $installDirResolved"
-Write-Host "Start Menu shortcut created under $startMenuDir"
+if (-not $NoShortcuts) {
+    Write-Host "Start Menu shortcut created under $startMenuDir"
+}

@@ -50,6 +50,20 @@ dotnet run --project tests/Replicator.Tests/Replicator.Tests.csproj
 
 ## Package And Install
 
+Install directly from a repo checkout:
+
+```powershell
+.\tools\install-dev.ps1
+```
+
+That command publishes a local package if needed, then installs Replicator per-user.
+
+For a file-only install without shortcuts:
+
+```powershell
+.\tools\install-dev.ps1 -NoShortcuts
+```
+
 Create a self-contained Windows x64 package:
 
 ```powershell
@@ -82,6 +96,12 @@ It also creates Start Menu and Desktop shortcuts. To skip the desktop shortcut:
 .\install-replicator.ps1 -NoDesktopShortcut
 ```
 
+To skip all shortcuts:
+
+```powershell
+.\install-replicator.ps1 -NoShortcuts
+```
+
 Uninstall:
 
 ```powershell
@@ -95,6 +115,21 @@ To also remove Replicator profile/script/log data:
 ```
 
 This is a lightweight installer path, not an MSI/MSIX yet. A future release can add WiX, MSIX, or Inno Setup once the app shape settles.
+
+## Drive Security
+
+Replicator is intended for sensitive local workstreams, so external-drive security should become a first-class feature. The likely implementation path is a BitLocker wrapper rather than custom encryption.
+
+Planned BitLocker support:
+
+- Detect whether a target or shuttle drive is BitLocker-protected.
+- Show drive lock/unlock/protection state in the profile UI.
+- Block `Prepare Shuttle`, `Receive Changes`, and scheduled backup writes when a required protected drive is locked or unprotected.
+- Offer guided setup for external drives using BitLocker To Go.
+- Store recovery-key reminders and policy metadata, but never store recovery keys in Replicator profile JSON.
+- Prefer Windows-native unlock flows and Credential Manager/DPAPI for any local secrets that are truly required.
+
+For now, use BitLocker manually on external shuttle/backup drives before trusting them with sensitive content.
 
 ## Backup Mode
 
@@ -167,6 +202,7 @@ Current shuttle actions are manual. Scheduled `Protect` for shuttle pairs should
 - S3-compatible targets are not implemented yet.
 - rclone, Kopia, restic, and Git shuttle engines are future adapters.
 - Automatic external-drive detection is not implemented yet.
+- BitLocker detection and secure-drive policy enforcement are not implemented yet.
 - Shuttle conflict handling currently preserves overwritten local files, but does not yet provide a full merge UI.
 - Restore/converge workflows are not implemented yet.
 - Hyper-V/VM backup scenarios need special handling and should not be treated as ordinary live folder copies.
@@ -177,6 +213,7 @@ Current shuttle actions are manual. Scheduled `Protect` for shuttle pairs should
 - Add minute-based schedules, not only hourly/daily/weekly.
 - Add a tray app or Windows Service that watches volume-arrival events and prompts when a known shuttle drive appears.
 - Add drive identity support so profiles match a volume, not just a drive letter.
+- Add BitLocker/secure-drive posture checks for backup and shuttle targets.
 - Add rclone as the default transfer backend for local/S3-compatible targets.
 - Add Git shuttle support using external-drive bare Git remotes.
 - Add explicit restore and converge workflows.
