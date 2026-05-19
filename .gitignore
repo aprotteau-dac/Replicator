@@ -1,0 +1,15 @@
+.dotnet-home/
+bin/
+obj/
+test-artifacts/
+artifacts/
+
+node_modules/
+*.user
+*.suo
+.vs/
+
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/
