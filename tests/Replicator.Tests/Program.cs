@@ -35,6 +35,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("bitlocker parser classifies protected unprotected and locked drives", BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives),
     ("bitlocker access denied is classified as permission required", BitLockerAccessDeniedIsClassifiedAsPermissionRequired),
     ("powershell bitlocker provider maps access denied to permission required", PowerShellBitLockerProviderMapsAccessDeniedToPermissionRequired),
+    ("drive security report treats permission required as a warning", DriveSecurityReportTreatsPermissionRequiredAsWarning),
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
 
@@ -877,6 +878,32 @@ static async Task PowerShellBitLockerProviderMapsAccessDeniedToPermissionRequire
     Assert(item.Severity == DriveSecuritySeverity.Warning, "Permission-required provider result should warn without blocking.");
     Assert(item.Message.Contains("elevated permissions", StringComparison.OrdinalIgnoreCase), $"Expected elevation guidance: {item.Message}");
     Assert(!item.Message.Contains("Get-CimInstance", StringComparison.OrdinalIgnoreCase), $"Expected raw command details to be hidden: {item.Message}");
+}
+
+static Task DriveSecurityReportTreatsPermissionRequiredAsWarning()
+{
+    var report = new ProfileDriveSecurityReport(
+    [
+        new DriveSecurityItem(
+            "Source drive",
+            @"D:\repos\personal",
+            @"D:\",
+            DriveSecurityState.PermissionRequired,
+            DriveSecuritySeverity.Warning,
+            @"Drive security: Source drive BitLocker status requires elevated permissions (D:\). Replicator can continue, but encryption state was not confirmed."),
+        new DriveSecurityItem(
+            "Target drive",
+            @"H:\dev\personal",
+            @"H:\",
+            DriveSecurityState.Protected,
+            DriveSecuritySeverity.Info,
+            @"Drive security: Target drive is BitLocker protected (H:\).")
+    ]);
+
+    Assert(report.HasWarnings, "Permission-required posture should set warning status.");
+    Assert(!report.HasErrors, "Permission-required posture should not be an error while drive-security is visibility-only.");
+    Assert(report.Summary.Contains("requires elevated permissions", StringComparison.OrdinalIgnoreCase), $"Unexpected summary: {report.Summary}");
+    return Task.CompletedTask;
 }
 
 static async Task ProfileDriveSecurityCheckerSummarizesBitLockerPosture()
