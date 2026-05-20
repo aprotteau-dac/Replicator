@@ -3,7 +3,7 @@ using Replicator.Core.Models;
 
 namespace Replicator.Core.Scheduling;
 
-public sealed class WindowsScheduledTaskService(ProcessRunner processRunner) : IScheduledTaskService
+public sealed class WindowsScheduledTaskService(IProcessRunner processRunner) : IScheduledTaskService
 {
     public async Task<TaskOperationResult> InstallOrUpdateAsync(
         BackupProfile profile,

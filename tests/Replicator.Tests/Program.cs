@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using Replicator.Core.Execution;
 using Replicator.Core.Availability;
 using Replicator.Core.Models;
 using Replicator.Core.Scheduling;
@@ -33,6 +34,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("availability checker reports unavailable drive", AvailabilityCheckerReportsUnavailableDrive),
     ("bitlocker parser classifies protected unprotected and locked drives", BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives),
     ("bitlocker access denied is classified as permission required", BitLockerAccessDeniedIsClassifiedAsPermissionRequired),
+    ("powershell bitlocker provider maps access denied to permission required", PowerShellBitLockerProviderMapsAccessDeniedToPermissionRequired),
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
 
@@ -858,6 +860,25 @@ static Task BitLockerAccessDeniedIsClassifiedAsPermissionRequired()
     return Task.CompletedTask;
 }
 
+static async Task PowerShellBitLockerProviderMapsAccessDeniedToPermissionRequired()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var runner = new FakeProcessRunner(new ProcessResult(1, "", "Get-CimInstance : Access denied"));
+    var item = await new PowerShellBitLockerStatusProvider(runner).CheckAsync(
+        "Source drive",
+        @"D:\repos\personal",
+        @"D:\");
+
+    Assert(item.State == DriveSecurityState.PermissionRequired, $"Expected permission-required state, got {item.State}.");
+    Assert(item.Severity == DriveSecuritySeverity.Warning, "Permission-required provider result should warn without blocking.");
+    Assert(item.Message.Contains("elevated permissions", StringComparison.OrdinalIgnoreCase), $"Expected elevation guidance: {item.Message}");
+    Assert(!item.Message.Contains("Get-CimInstance", StringComparison.OrdinalIgnoreCase), $"Expected raw command details to be hidden: {item.Message}");
+}
+
 static async Task ProfileDriveSecurityCheckerSummarizesBitLockerPosture()
 {
     var profile = ValidProfile();
@@ -1007,5 +1028,19 @@ sealed class FakeBitLockerStatusProvider : IBitLockerStatusProvider
         return Task.FromResult(Items.TryGetValue(root, out var item)
             ? item
             : new DriveSecurityItem(label, path, root, DriveSecurityState.Unknown, DriveSecuritySeverity.Warning, $"Unknown: {root}"));
+    }
+}
+
+sealed class FakeProcessRunner(ProcessResult result) : IProcessRunner
+{
+    public IReadOnlyList<string> LastArguments { get; private set; } = [];
+
+    public Task<ProcessResult> RunAsync(
+        string fileName,
+        IEnumerable<string> arguments,
+        CancellationToken cancellationToken = default)
+    {
+        LastArguments = arguments.ToList();
+        return Task.FromResult(result);
     }
 }

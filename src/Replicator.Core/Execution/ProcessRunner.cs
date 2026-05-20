@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Replicator.Core.Execution;
 
-public sealed class ProcessRunner
+public sealed class ProcessRunner : IProcessRunner
 {
     public async Task<ProcessResult> RunAsync(
         string fileName,

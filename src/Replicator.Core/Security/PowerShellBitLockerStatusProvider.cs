@@ -2,7 +2,7 @@ using Replicator.Core.Execution;
 
 namespace Replicator.Core.Security;
 
-public sealed class PowerShellBitLockerStatusProvider(ProcessRunner processRunner) : IBitLockerStatusProvider
+public sealed class PowerShellBitLockerStatusProvider(IProcessRunner processRunner) : IBitLockerStatusProvider
 {
     public async Task<DriveSecurityItem> CheckAsync(
         string label,
@@ -12,13 +12,13 @@ public sealed class PowerShellBitLockerStatusProvider(ProcessRunner processRunne
     {
         if (!OperatingSystem.IsWindows())
         {
-            return Unknown(label, path, root, "BitLocker status is only available on Windows.");
+            return BitLockerQueryFailureClassifier.ToSecurityItem(label, path, root, "BitLocker status is only available on Windows.");
         }
 
         var mountPoint = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (string.IsNullOrWhiteSpace(mountPoint))
         {
-            return Unknown(label, path, root, "Drive root is unavailable.");
+            return BitLockerQueryFailureClassifier.ToSecurityItem(label, path, root, "Drive root is unavailable.");
         }
 
         var escapedMountPoint = mountPoint.Replace("'", "''");
@@ -51,61 +51,17 @@ public sealed class PowerShellBitLockerStatusProvider(ProcessRunner processRunne
             if (!result.Succeeded)
             {
                 var message = FirstNonEmptyLine(result.StandardError) ?? FirstNonEmptyLine(result.StandardOutput) ?? "BitLocker status command failed.";
-                return IsUnavailableMessage(message)
-                    ? Unavailable(label, path, root, message)
-                    : Unknown(label, path, root, message);
+                return BitLockerQueryFailureClassifier.ToSecurityItem(label, path, root, message);
             }
 
             return BitLockerStatusParser.TryParseJson(result.StandardOutput, out var status)
                 ? BitLockerStatusParser.ToSecurityItem(label, path, root, status)
-                : Unknown(label, path, root, "BitLocker status output could not be parsed.");
+                : BitLockerQueryFailureClassifier.ToSecurityItem(label, path, root, "BitLocker status output could not be parsed.");
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
         {
-            return Unknown(label, path, root, exception.Message);
+            return BitLockerQueryFailureClassifier.ToSecurityItem(label, path, root, exception.Message);
         }
-    }
-
-    private static DriveSecurityItem Unknown(string label, string path, string root, string reason)
-    {
-        return new DriveSecurityItem(
-            label,
-            path,
-            root,
-            DriveSecurityState.Unknown,
-            DriveSecuritySeverity.Warning,
-            $"Drive security: {label} BitLocker status unknown ({root}). {FormatUnknownReason(root, reason)}");
-    }
-
-    private static DriveSecurityItem Unavailable(string label, string path, string root, string reason)
-    {
-        return new DriveSecurityItem(
-            label,
-            path,
-            root,
-            DriveSecurityState.Unavailable,
-            DriveSecuritySeverity.Error,
-            $"Drive security: {label} is unavailable ({root}). {reason}");
-    }
-
-    private static string FormatUnknownReason(string root, string reason)
-    {
-        return IsAccessDeniedMessage(reason)
-            ? $"Cannot check BitLocker status for {root} without elevated permissions."
-            : reason;
-    }
-
-    private static bool IsUnavailableMessage(string message)
-    {
-        return message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("cannot find", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("does not exist", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsAccessDeniedMessage(string message)
-    {
-        return message.Contains("access denied", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? FirstNonEmptyLine(string text)
