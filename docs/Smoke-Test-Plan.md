@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-18 test(s) passed.
+22 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -28,6 +28,8 @@ This gate covers:
 - shuttle manifest file entries and hash-backed skip analysis
 - shuttle progress reporting
 - shuttle cancellation token handling
+- shuttle operation blocking for unavailable source or shuttle paths
+- shuttle environment-variable source path expansion
 - scheduled task naming
 - minute schedule command generation and validation
 - default development excludes
@@ -200,7 +202,7 @@ Pass criteria:
 
 ## Stop Criteria
 
-Stop the smoke pass and open a bug if any of these occur:
+Stop the smoke pass and open a [GitHub bug](Bug-Tracking.md) if any of these occur:
 
 - app hangs for more than 30 seconds after canceling a shuttle operation
 - backup or shuttle writes to an unexpected path

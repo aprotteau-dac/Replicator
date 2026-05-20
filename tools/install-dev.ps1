@@ -4,7 +4,8 @@ param(
     [string] $InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\Replicator"),
     [switch] $NoDesktopShortcut,
     [switch] $NoShortcuts,
-    [switch] $FrameworkDependent
+    [switch] $FrameworkDependent,
+    [switch] $SkipPublish
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,7 +15,7 @@ $packageDir = Join-Path $repoRoot "artifacts\package\Replicator-$Version-$Runtim
 $packageInstaller = Join-Path $packageDir "install-replicator.ps1"
 $packageExe = Join-Path $packageDir "Replicator.App.exe"
 
-if (-not (Test-Path $packageExe)) {
+if (-not $SkipPublish) {
     $publishScript = Join-Path $PSScriptRoot "publish-release.ps1"
     $publishArgs = @{
         Version = $Version
@@ -26,6 +27,8 @@ if (-not (Test-Path $packageExe)) {
     }
 
     & $publishScript @publishArgs
+} elseif (-not (Test-Path $packageExe)) {
+    throw "Packaged executable not found: $packageExe. Run without -SkipPublish to build it."
 }
 
 if (-not (Test-Path $packageInstaller)) {

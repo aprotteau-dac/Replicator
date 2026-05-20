@@ -28,7 +28,7 @@ The app separates several concepts that are often conflated:
 - Machine identity in `%LOCALAPPDATA%\Replicator\machine-id.txt`.
 - Windows Task Scheduler install, run, enable, disable, query, and removal under `\Replicator\`.
 - Manual, minute-based, hourly, daily, and weekly schedule cadences.
-- Source/target availability preflight for manual runs and generated scheduled scripts.
+- Source/target/shuttle availability preflight for manual runs, shuttle operations, and generated scheduled scripts.
 - Shuttle operations run off the UI thread with file-count progress and cancellation.
 - BitLocker posture visibility for local Windows drive roots.
 - Repeatable smoke-test gate and manual smoke plan.
@@ -71,7 +71,13 @@ Install directly from a repo checkout:
 .\tools\install-dev.ps1
 ```
 
-That command publishes a local package if needed, then installs Replicator per-user.
+That command rebuilds the local package, then installs Replicator per-user.
+
+To intentionally reuse an existing package:
+
+```powershell
+.\tools\install-dev.ps1 -SkipPublish
+```
 
 For a file-only install without shortcuts:
 
@@ -247,7 +253,7 @@ Field note: shuttling about 6,500 files worked, but caused major UI lockup in th
 
 Near-term backlog items:
 
-- **Graceful unavailable states**: initial backup-profile preflight and scheduled-script failures are implemented. Next expansion is `shuttle drive locked/missing` and secure-drive policy detail.
+- **Graceful unavailable states**: backup-profile preflight, scheduled-script failures, and shuttle operation availability blocks are implemented. Next expansion is secure-drive policy detail and BitLocker enforcement.
 - **BitLocker posture checks**: first visibility slice implemented. Replicator now checks local Windows profile drive roots and reports protected, unprotected, locked, unavailable, or unknown posture. Remaining work: policy enforcement, unlock guidance, and BitLocker To Go setup flow.
 - **Known shuttle drive detection**: add a tray app or Windows Service that watches for volume arrival, recognizes member drives, and prompts `Dock Shuttle` when relevant.
 - **Drive identity over drive letters**: bind profiles to volume identity/label/serial metadata so `E:` becoming `F:` does not break profiles.

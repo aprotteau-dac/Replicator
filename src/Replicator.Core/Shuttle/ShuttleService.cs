@@ -35,6 +35,13 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return availability;
         }
 
+        var sourceRoot = ExpandPath(profile.SourcePath);
+        var sourceAvailability = CheckSourceAvailability(profile, sourceRoot);
+        if (sourceAvailability is not null)
+        {
+            return sourceAvailability;
+        }
+
         paths.EnsureCreated();
 
         var inboundManifest = await ReadLatestReadyToDockManifestAsync(paths, cancellationToken);
@@ -46,11 +53,6 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
                 false,
                 $"Inbound shuttle from {inboundManifest.FromMachineName} is waiting. Dock and receive it before preparing outbound changes.",
                 inboundManifest);
-        }
-
-        if (!Directory.Exists(profile.SourcePath))
-        {
-            return new ShuttleOperationResult(false, $"Source path is unavailable: {profile.SourcePath}", null);
         }
 
         var previousPrepareManifest = await ReadStateManifestAsync(paths, $"latest-prepare-{machineIdentity.MachineId}.json", cancellationToken);
@@ -70,7 +72,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
             processedFiles++;
             manifest.TotalFiles++;
-            var relativePath = NormalizeRelativePath(Path.GetRelativePath(profile.SourcePath, sourceFile));
+            var relativePath = NormalizeRelativePath(Path.GetRelativePath(sourceRoot, sourceFile));
             previousEntries.TryGetValue(relativePath, out var previousEntry);
             var sourceInfo = new FileInfo(sourceFile);
             var sourceEntry = TryReuseEntry(relativePath, sourceInfo, previousEntry);
@@ -183,6 +185,12 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return availability;
         }
 
+        var sourceAvailability = CheckSourceAvailability(profile);
+        if (sourceAvailability is not null)
+        {
+            return sourceAvailability;
+        }
+
         paths.EnsureCreated();
         ReportProgress(progress, ShuttleOperationKind.Depart, 0, 0, "Reading prepared shuttle payload...");
 
@@ -223,6 +231,12 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         if (availability is not null)
         {
             return availability;
+        }
+
+        var sourceAvailability = CheckSourceAvailability(profile);
+        if (sourceAvailability is not null)
+        {
+            return sourceAvailability;
         }
 
         var inboundManifest = await ReadLatestReadyToDockManifestAsync(paths, cancellationToken);
@@ -269,8 +283,13 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return new ShuttleOperationResult(true, "No inbound shuttle changes are waiting for this machine.", inboundManifest);
         }
 
+        var sourceAvailability = CheckSourceAvailability(profile);
+        if (sourceAvailability is not null)
+        {
+            return sourceAvailability;
+        }
+
         paths.EnsureCreated();
-        Directory.CreateDirectory(profile.SourcePath);
 
         var startedAt = DateTimeOffset.UtcNow;
         var receiveManifest = CreateManifest(profile, paths, ShuttleOperationKind.Receive, readyToDock: false, startedAt);
@@ -384,6 +403,18 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         return null;
     }
 
+    private static ShuttleOperationResult? CheckSourceAvailability(BackupProfile profile)
+    {
+        return CheckSourceAvailability(profile, ExpandPath(profile.SourcePath));
+    }
+
+    private static ShuttleOperationResult? CheckSourceAvailability(BackupProfile profile, string sourceRoot)
+    {
+        return Directory.Exists(sourceRoot)
+            ? null
+            : new ShuttleOperationResult(false, $"Source path is unavailable: {profile.SourcePath}", null);
+    }
+
     private ShuttleManifest CreateManifest(
         BackupProfile profile,
         ShuttlePaths paths,
@@ -401,7 +432,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             ReadyToDock = readyToDock,
             FromMachineId = machineIdentity.MachineId,
             FromMachineName = machineIdentity.MachineName,
-            SourcePath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(profile.SourcePath)),
+            SourcePath = ExpandPath(profile.SourcePath),
             ShuttlePath = paths.PairRoot,
             PayloadPath = paths.PayloadDirectory,
             DriveRoot = driveInfo?.RootDirectory.FullName ?? "",
@@ -483,7 +514,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
     private IEnumerable<string> EnumerateSourceFiles(BackupProfile profile, CancellationToken cancellationToken)
     {
-        var sourceRoot = Path.GetFullPath(Environment.ExpandEnvironmentVariables(profile.SourcePath));
+        var sourceRoot = ExpandPath(profile.SourcePath);
         foreach (var path in EnumerateFiles(sourceRoot, cancellationToken))
         {
             var relativePath = Path.GetRelativePath(sourceRoot, path);
@@ -492,6 +523,11 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
                 yield return path;
             }
         }
+    }
+
+    private static string ExpandPath(string path)
+    {
+        return Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
     }
 
     private static IEnumerable<string> EnumerateFiles(string root, CancellationToken cancellationToken)

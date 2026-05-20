@@ -8,7 +8,13 @@ Install directly from a repo checkout:
 .\tools\install-dev.ps1
 ```
 
-This publishes a local package if needed, then installs Replicator per-user.
+This rebuilds the local package, then installs Replicator per-user.
+
+To intentionally reuse an existing package:
+
+```powershell
+.\tools\install-dev.ps1 -SkipPublish
+```
 
 File-only install without shortcuts:
 

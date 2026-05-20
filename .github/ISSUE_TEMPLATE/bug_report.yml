@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible defect, regression, or smoke-test failure.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for behavior that is broken now. Planned work belongs in the roadmap/backlog.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+      placeholder: Replicator...
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What user workflow or safety property is affected?
+      placeholder: This affects...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use disposable paths when the bug involves backup or shuttle writes.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: I expected...
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: Instead...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backup
+        - Shuttle
+        - Scheduling
+        - Installer
+        - Drive security
+        - UI
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add logs, screenshots, command output, or paths to local test artifacts.
+      placeholder: |
+        Smoke command:
+        Latest log:
+        Screenshot:
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I used disposable paths or verified this cannot write to a real workstream unexpectedly.
+          required: false
+        - label: I checked whether this is already covered by an open issue.
+          required: false

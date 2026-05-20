@@ -11,6 +11,8 @@ Use these docs as the project wiki until the GitHub wiki is available.
 - [Shuttle Mode](Shuttle-Mode.md)
 - [Drive Security](Drive-Security.md)
 - [Brand](Brand.md)
+- [Bug Tracking](Bug-Tracking.md)
+- [Backlog Decision Log](Backlog-Decision-Log.md)
 - [Job History And Audit](Job-History-And-Audit.md)
 - [Smoke Test Plan](Smoke-Test-Plan.md)
 - [Packaging And Install](Packaging-And-Install.md)

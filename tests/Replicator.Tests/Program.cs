@@ -20,6 +20,10 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("shuttle prepare reports file progress", ShuttlePrepareReportsFileProgress),
     ("shuttle prepare reports progress for skipped files", ShuttlePrepareReportsProgressForSkippedFiles),
     ("shuttle operations honor cancellation", ShuttleOperationsHonorCancellation),
+    ("shuttle prepare blocks missing source before creating shuttle directories", ShuttlePrepareBlocksMissingSourceBeforeCreatingShuttleDirectories),
+    ("shuttle receive blocks missing source without creating it", ShuttleReceiveBlocksMissingSourceWithoutCreatingIt),
+    ("shuttle prepare expands environment variable source path", ShuttlePrepareExpandsEnvironmentVariableSourcePath),
+    ("shuttle metadata operations block missing source", ShuttleMetadataOperationsBlockMissingSource),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
     ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes),
@@ -529,6 +533,135 @@ static async Task ShuttleOperationsHonorCancellation()
             : 0;
 
         Assert(manifestCount == 0, "Expected canceled prepare to avoid writing manifests.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttlePrepareBlocksMissingSourceBeforeCreatingShuttleDirectories()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "missing-source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+        var service = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+
+        var prepare = await service.PrepareAsync(profile);
+
+        Assert(!prepare.Succeeded, "Expected Prepare Shuttle to block a missing source.");
+        Assert(prepare.Message.Contains("Source path is unavailable", StringComparison.OrdinalIgnoreCase), $"Unexpected prepare message: {prepare.Message}");
+        Assert(!Directory.Exists(shuttleRoot), "Prepare Shuttle should not create shuttle directories after an availability error.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttleReceiveBlocksMissingSourceWithoutCreatingIt()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var homeSource = Path.Combine(root, "home-source");
+    var workSource = Path.Combine(root, "missing-work-source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    Directory.CreateDirectory(homeSource);
+
+    try
+    {
+        var profileId = Guid.NewGuid();
+        File.WriteAllText(Path.Combine(homeSource, "one.md"), "one");
+
+        var homeProfile = ValidShuttleProfile(profileId, homeSource, shuttleRoot);
+        var workProfile = ValidShuttleProfile(profileId, workSource, shuttleRoot);
+        var home = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+        var work = new ShuttleService(new MachineIdentity("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "WORK"));
+
+        var prepare = await home.PrepareAsync(homeProfile);
+        Assert(prepare.Succeeded, $"Expected prepare to seed inbound shuttle payload: {prepare.Message}");
+        var depart = await home.DepartAsync(homeProfile);
+        Assert(depart.Succeeded, $"Expected depart to mark inbound shuttle payload ready: {depart.Message}");
+
+        var receive = await work.ReceiveAsync(workProfile);
+
+        Assert(!receive.Succeeded, "Expected Receive Changes to block a missing source.");
+        Assert(receive.Message.Contains("Source path is unavailable", StringComparison.OrdinalIgnoreCase), $"Unexpected receive message: {receive.Message}");
+        Assert(!Directory.Exists(workSource), "Receive Changes should not create a missing source path after an availability error.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttlePrepareExpandsEnvironmentVariableSourcePath()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    const string variableName = "REPLICATOR_TEST_SOURCE";
+    var previousValue = Environment.GetEnvironmentVariable(variableName);
+
+    Directory.CreateDirectory(source);
+
+    try
+    {
+        File.WriteAllText(Path.Combine(source, "one.md"), "one");
+        Environment.SetEnvironmentVariable(variableName, source);
+
+        var profile = ValidShuttleProfile(Guid.NewGuid(), $"%{variableName}%", shuttleRoot);
+        var service = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+
+        var prepare = await service.PrepareAsync(profile);
+
+        Assert(prepare.Succeeded, $"Expected Prepare Shuttle to expand environment variable source paths: {prepare.Message}");
+        Assert(prepare.Manifest?.SourcePath == Path.GetFullPath(source), "Expected manifest source path to be expanded.");
+        Assert(File.Exists(Path.Combine(shuttleRoot, "payload", "one.md")), "Expected staged payload file from expanded source path.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable(variableName, previousValue);
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttleMetadataOperationsBlockMissingSource()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "missing-source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+        var service = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+
+        var depart = await service.DepartAsync(profile);
+        var dock = await service.DockAsync(profile);
+
+        Assert(!depart.Succeeded, "Expected Depart to block a missing source.");
+        Assert(depart.Message.Contains("Source path is unavailable", StringComparison.OrdinalIgnoreCase), $"Unexpected depart message: {depart.Message}");
+        Assert(!dock.Succeeded, "Expected Dock Shuttle to block a missing source.");
+        Assert(dock.Message.Contains("Source path is unavailable", StringComparison.OrdinalIgnoreCase), $"Unexpected dock message: {dock.Message}");
+        Assert(!Directory.Exists(shuttleRoot), "Metadata shuttle operations should not create shuttle directories after an availability error.");
     }
     finally
     {
