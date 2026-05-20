@@ -4,7 +4,7 @@ Replicator is a Windows backup and shuttle-control app for people who maintain s
 
 It is a .NET 8 WPF desktop app that manages local backup profiles, generates auditable PowerShell scripts, installs scheduled tasks, and supports an early external-drive shuttle workflow for moving paired repos/folders between trusted machines.
 
-> Status: early prototype. The backup path is usable for local testing; shuttle mode is a first vertical slice and should be treated carefully until it has more review, restore tooling, and conflict UX.
+> Status: early prototype. Backup mode is usable for local testing with availability preflight, generated scripts, Task Scheduler integration, and minute/hourly/daily/weekly cadences. Shuttle mode is a first vertical slice with progress, cancellation, and conflict-preserving receive behavior, but still needs review, restore tooling, resumability, and conflict UX.
 
 ## Why
 
@@ -19,7 +19,7 @@ The app separates several concepts that are often conflated:
 
 ## Current Capabilities
 
-- Windows-only WPF UI with a Solarized dark, Fluent-inspired theme.
+- Windows-only WPF UI with the Replicator Industrial Red brand theme.
 - Local source-to-local destination backup profiles.
 - Controlled shuttle profiles for external-drive handoff between trusted machines.
 - Generated PowerShell scripts under `%LOCALAPPDATA%\Replicator\scripts`.
@@ -27,6 +27,11 @@ The app separates several concepts that are often conflated:
 - Profile metadata in `%LOCALAPPDATA%\Replicator\profiles.json`.
 - Machine identity in `%LOCALAPPDATA%\Replicator\machine-id.txt`.
 - Windows Task Scheduler install, run, enable, disable, query, and removal under `\Replicator\`.
+- Manual, minute-based, hourly, daily, and weekly schedule cadences.
+- Source/target availability preflight for manual runs and generated scheduled scripts.
+- Shuttle operations run off the UI thread with file-count progress and cancellation.
+- BitLocker posture visibility for local Windows drive roots.
+- Repeatable smoke-test gate and manual smoke plan.
 - Dry-run defaults for new profiles.
 
 ## Requirements
@@ -46,6 +51,16 @@ dotnet run --project src/Replicator.App/Replicator.App.csproj
 
 ```powershell
 dotnet run --project tests/Replicator.Tests/Replicator.Tests.csproj
+```
+
+## Documentation
+
+Project docs live in [docs/Home.md](docs/Home.md). They mirror the intended GitHub wiki structure and cover concepts, backup mode, shuttle mode, drive security, packaging, and the roadmap.
+
+For a repeatable pre-release check, use [docs/Smoke-Test-Plan.md](docs/Smoke-Test-Plan.md) or run:
+
+```powershell
+.\tools\run-smoke-tests.ps1
 ```
 
 ## Package And Install
@@ -120,10 +135,13 @@ This is a lightweight installer path, not an MSI/MSIX yet. A future release can 
 
 Replicator is intended for sensitive local workstreams, so external-drive security should become a first-class feature. The likely implementation path is a BitLocker wrapper rather than custom encryption.
 
-Planned BitLocker support:
+Implemented BitLocker visibility:
 
 - Detect whether a target or shuttle drive is BitLocker-protected.
 - Show drive lock/unlock/protection state in the profile UI.
+
+Planned BitLocker enforcement:
+
 - Block `Prepare Shuttle`, `Receive Changes`, and scheduled backup writes when a required protected drive is locked or unprotected.
 - Offer guided setup for external drives using BitLocker To Go.
 - Store recovery-key reminders and policy metadata, but never store recovery keys in Replicator profile JSON.
@@ -179,6 +197,8 @@ Workflow:
 - `Dock Shuttle`: scans an inbound departed payload and summarizes new, changed, and conflicting files.
 - `Receive Changes`: applies inbound files and preserves overwritten local files under `conflicts\`.
 
+Long term, shuttle should be an additive capability on a protected profile, not an either/or replacement for backup mode. The current prototype separates `Backup` and `Shuttle` modes to prove the workflow, but the intended model is a profile that can protect on cadence and also perform shuttle handoff.
+
 The intended rhythm is:
 
 ```text
@@ -197,26 +217,49 @@ Home/travel machine:
 
 Current shuttle actions are manual. Scheduled `Protect` for shuttle pairs should be implemented as a dedicated shuttle task runner rather than reusing the backup robocopy script, because shuttle protect needs manifests and pending-inbound guards.
 
+Field note: shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, and can be canceled from the UI. The engine still needs incremental manifests, resumability, and a better result surface before it is suitable for larger folders.
+
 ## Known Limitations
 
 - S3-compatible targets are not implemented yet.
 - rclone, Kopia, restic, and Git shuttle engines are future adapters.
 - Automatic external-drive detection is not implemented yet.
-- BitLocker detection and secure-drive policy enforcement are not implemented yet.
+- BitLocker posture visibility is implemented for local Windows drive roots. Secure-drive policy enforcement is not implemented yet.
 - Shuttle conflict handling currently preserves overwritten local files, but does not yet provide a full merge UI.
 - Restore/converge workflows are not implemented yet.
 - Hyper-V/VM backup scenarios need special handling and should not be treated as ordinary live folder copies.
+- Shuttle currently behaves like a separate mode instead of an additive capability layered on top of scheduled protect/backup behavior.
 
 ## Planned Direction
 
-- Add graceful unavailable-source/unavailable-target states.
-- Add minute-based schedules, not only hourly/daily/weekly.
+- Expand graceful unavailable-source/unavailable-target states into BitLocker and drive-identity aware states.
+- Expand scheduling beyond manual/minute/hourly/daily/weekly with richer calendar rules if needed.
 - Add a tray app or Windows Service that watches volume-arrival events and prompts when a known shuttle drive appears.
 - Add drive identity support so profiles match a volume, not just a drive letter.
-- Add BitLocker/secure-drive posture checks for backup and shuttle targets.
+- Add BitLocker/secure-drive policy enforcement for backup and shuttle targets.
 - Add rclone as the default transfer backend for local/S3-compatible targets.
 - Add Git shuttle support using external-drive bare Git remotes.
 - Add explicit restore and converge workflows.
+- Collapse shuttle into the profile model as an additive capability, not an either/or replacement for backup mode.
+- Replace the prototype results textbox with durable job history, structured logging, and audit drill-down backed by a lightweight database.
+
+## Backlog
+
+Near-term backlog items:
+
+- **Graceful unavailable states**: initial backup-profile preflight and scheduled-script failures are implemented. Next expansion is `shuttle drive locked/missing` and secure-drive policy detail.
+- **BitLocker posture checks**: first visibility slice implemented. Replicator now checks local Windows profile drive roots and reports protected, unprotected, locked, unavailable, or unknown posture. Remaining work: policy enforcement, unlock guidance, and BitLocker To Go setup flow.
+- **Known shuttle drive detection**: add a tray app or Windows Service that watches for volume arrival, recognizes member drives, and prompts `Dock Shuttle` when relevant.
+- **Drive identity over drive letters**: bind profiles to volume identity/label/serial metadata so `E:` becoming `F:` does not break profiles.
+- **Shuttle protect cadence**: add a dedicated scheduled shuttle-protect runner that writes manifests and respects pending inbound state, rather than reusing the backup robocopy runner.
+- **Shuttle as profile capability**: redesign profiles so a profile can run scheduled protect/backup behavior and also expose shuttle actions. The current `Backup` versus `Shuttle` split is a prototype simplification.
+- **Large shuttle performance**: first slices implemented. Shuttle file work now runs off the WPF UI thread with throttled file-count progress, stream hashing, and user-initiated cancellation. Remaining work: incremental manifests, resumability, and avoiding long operation output in a single text box.
+- **Job history and audit UI**: replace the results textbox with a tabular jobs view backed by SQLite or another lightweight local database. Every backup/shuttle/restore run should create an auditable job record with stats, logs, artifacts, and drill-down detail.
+- **Path drift compensation**: match shuttle pairs even when the local repo/folder moved or has a different intermediate path, using explicit pair ids, Git history/ref fingerprints, and content similarity.
+- **Git shuttle engine**: support external-drive bare Git remotes for sensitive repos so committed work can move through Git’s conflict model without network remotes.
+- **rclone engine**: add rclone-backed `copy`, `sync`, and later `bisync` adapters for local, S3-compatible, and broader storage targets.
+- **Restore/converge workflows**: keep backup namespaces authoritative and build explicit preview-first restore/converge flows from those backups.
+- **Conflict review UI**: replace the current conflict-preserve behavior with a reviewer surface for incoming, local, and preserved copies.
 
 ## WinUI 3 Path
 

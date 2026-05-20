@@ -123,6 +123,9 @@ public sealed class WindowsScheduledTaskService(ProcessRunner processRunner) : I
             case ScheduleCadence.Hourly:
                 arguments.AddRange(["/SC", "HOURLY", "/MO", profile.Schedule.IntervalHours.ToString(), "/ST", FormatTime(profile.Schedule.TimeOfDay)]);
                 break;
+            case ScheduleCadence.Minutes:
+                arguments.AddRange(["/SC", "MINUTE", "/MO", profile.Schedule.IntervalMinutes.ToString(), "/ST", FormatTime(profile.Schedule.TimeOfDay)]);
+                break;
             default:
                 throw new InvalidOperationException($"Unsupported schedule cadence: {profile.Schedule.Cadence}");
         }

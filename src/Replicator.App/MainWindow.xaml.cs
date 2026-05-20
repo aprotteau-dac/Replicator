@@ -3,10 +3,12 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using Replicator.Core;
+using Replicator.Core.Availability;
 using Replicator.Core.Execution;
 using Replicator.Core.Models;
 using Replicator.Core.Scheduling;
 using Replicator.Core.Scripting;
+using Replicator.Core.Security;
 using Replicator.Core.Shuttle;
 using Replicator.Core.Storage;
 using MessageBox = System.Windows.MessageBox;
@@ -18,6 +20,8 @@ public partial class MainWindow : Window
 {
     private readonly ReplicatorPaths _paths;
     private readonly IProfileStore _profileStore;
+    private readonly ProfileAvailabilityChecker _availabilityChecker;
+    private readonly ProfileDriveSecurityChecker _driveSecurityChecker;
     private readonly PowerShellScriptGenerator _scriptGenerator;
     private readonly BackupLogReader _logReader;
     private readonly ShuttleService _shuttleService;
@@ -25,6 +29,7 @@ public partial class MainWindow : Window
     private readonly IScheduledTaskService _scheduledTasks;
     private readonly ObservableCollection<BackupProfile> _profiles = [];
     private ScheduledTaskSnapshot? _currentTaskSnapshot;
+    private CancellationTokenSource? _currentOperationCancellationSource;
     private bool _isBusy;
     private bool _loadingProfile;
 
@@ -35,10 +40,12 @@ public partial class MainWindow : Window
         _paths = ReplicatorPaths.CreateDefault();
         _paths.EnsureCreated();
         _profileStore = new JsonProfileStore(_paths.ProfilesFile);
+        _availabilityChecker = new ProfileAvailabilityChecker();
+        _processRunner = new ProcessRunner();
+        _driveSecurityChecker = new ProfileDriveSecurityChecker(new PowerShellBitLockerStatusProvider(_processRunner));
         _scriptGenerator = new PowerShellScriptGenerator(_paths.ScriptsDirectory, _paths.LogsDirectory);
         _logReader = new BackupLogReader(_paths.LogsDirectory);
         _shuttleService = new ShuttleService(new MachineIdentityProvider(_paths.MachineIdentityFile).GetOrCreate());
-        _processRunner = new ProcessRunner();
         _scheduledTasks = new WindowsScheduledTaskService(_processRunner);
 
         ProfilesList.ItemsSource = _profiles;
@@ -127,6 +134,7 @@ public partial class MainWindow : Window
         if (profile is not null)
         {
             await RefreshTaskStatusAsync(profile);
+            await RefreshDriveSecurityAsync(profile);
         }
     }
 
@@ -155,7 +163,16 @@ public partial class MainWindow : Window
 
         profile.Mode = mode;
         DestinationLabel.Content = mode == ProfileMode.Shuttle ? "Shuttle path" : "Destination";
+        ShowAvailability(_availabilityChecker.Check(profile));
         UpdateActionSurface(profile, _currentTaskSnapshot);
+    }
+
+    private void CadenceComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (CadenceComboBox.SelectedItem is ScheduleCadence cadence)
+        {
+            UpdateIntervalLabel(cadence);
+        }
     }
 
     private async void SaveProfile_Click(object sender, RoutedEventArgs e)
@@ -277,28 +294,36 @@ public partial class MainWindow : Window
         if (profile is not null)
         {
             await RefreshTaskStatusAsync(profile);
+            await RefreshDriveSecurityAsync(profile);
             ShowLatestRun(profile);
         }
     }
 
     private async void PrepareShuttle_Click(object sender, RoutedEventArgs e)
     {
-        await RunShuttleAsync("Preparing shuttle...", profile => _shuttleService.PrepareAsync(profile));
+        await RunShuttleAsync("Preparing shuttle...", (profile, progress, cancellationToken) => _shuttleService.PrepareAsync(profile, progress, cancellationToken));
     }
 
     private async void DepartShuttle_Click(object sender, RoutedEventArgs e)
     {
-        await RunShuttleAsync("Marking shuttle ready to depart...", profile => _shuttleService.DepartAsync(profile));
+        await RunShuttleAsync("Marking shuttle ready to depart...", (profile, progress, cancellationToken) => _shuttleService.DepartAsync(profile, progress, cancellationToken));
     }
 
     private async void DockShuttle_Click(object sender, RoutedEventArgs e)
     {
-        await RunShuttleAsync("Docking shuttle...", profile => _shuttleService.DockAsync(profile));
+        await RunShuttleAsync("Docking shuttle...", (profile, progress, cancellationToken) => _shuttleService.DockAsync(profile, progress, cancellationToken));
     }
 
     private async void ReceiveShuttle_Click(object sender, RoutedEventArgs e)
     {
-        await RunShuttleAsync("Receiving shuttle changes...", profile => _shuttleService.ReceiveAsync(profile));
+        await RunShuttleAsync("Receiving shuttle changes...", (profile, progress, cancellationToken) => _shuttleService.ReceiveAsync(profile, progress, cancellationToken));
+    }
+
+    private void CancelOperation_Click(object sender, RoutedEventArgs e)
+    {
+        _currentOperationCancellationSource?.Cancel();
+        CancelOperationButton.IsEnabled = false;
+        ShowStatus("Cancellation requested...", false);
     }
 
     private async Task SaveSelectedProfileAsync()
@@ -312,6 +337,7 @@ public partial class MainWindow : Window
         ProfilesList.Items.Refresh();
         HeaderTextBlock.Text = profile.Name;
         ShowStatus("Profile saved.", true);
+        await RefreshDriveSecurityAsync(profile);
     }
 
     private async Task ChangeTaskAsync(Func<BackupProfile, Task<TaskOperationResult>> operation)
@@ -333,9 +359,9 @@ public partial class MainWindow : Window
 
     private async Task RunShuttleAsync(
         string busyMessage,
-        Func<BackupProfile, Task<ShuttleOperationResult>> operation)
+        Func<BackupProfile, IProgress<ShuttleOperationProgress>, CancellationToken, Task<ShuttleOperationResult>> operation)
     {
-        await RunBusyAsync(busyMessage, async () =>
+        await RunBusyAsync(busyMessage, async cancellationToken =>
         {
             if (!TryApplyForm(out var profile))
             {
@@ -343,12 +369,14 @@ public partial class MainWindow : Window
             }
 
             await _profileStore.UpsertAsync(profile);
-            var result = await operation(profile);
+            ShowAvailability(_availabilityChecker.Check(profile));
+            var progress = new Progress<ShuttleOperationProgress>(ShowShuttleProgress);
+            var result = await Task.Run(() => operation(profile, progress, cancellationToken), cancellationToken);
             OutputTextBox.Text = result.ToDisplayString();
             OutputTextBox.ScrollToEnd();
             ShowStatus(result.Message, result.Succeeded);
             UpdateActionSurface(profile, _currentTaskSnapshot);
-        });
+        }, canCancel: true);
     }
 
     private async Task RefreshTaskStatusAsync(BackupProfile profile)
@@ -366,6 +394,16 @@ public partial class MainWindow : Window
 
     private async Task RunScriptAsync(BackupProfile profile, bool forceDryRun)
     {
+        var availability = _availabilityChecker.Check(profile);
+        ShowAvailability(availability);
+        if (availability.HasErrors)
+        {
+            OutputTextBox.Text = availability.ToDisplayString();
+            OutputTextBox.ScrollToEnd();
+            ShowStatus(availability.Summary, false);
+            return;
+        }
+
         await _profileStore.UpsertAsync(profile);
         var script = await _scriptGenerator.WriteAsync(profile);
         var arguments = new List<string>
@@ -440,6 +478,8 @@ public partial class MainWindow : Window
             {
                 HeaderTextBlock.Text = "Replicator";
                 TaskSummaryTextBlock.Text = "No profile selected.";
+                AvailabilityTextBlock.Text = "Availability not checked.";
+                DriveSecurityTextBlock.Text = "Drive security not checked.";
                 _currentTaskSnapshot = null;
                 UpdateActionSurface(null, null);
                 return;
@@ -455,7 +495,10 @@ public partial class MainWindow : Window
             CadenceComboBox.SelectedItem = profile.Schedule.Cadence;
             TimeTextBox.Text = profile.Schedule.TimeOfDay.ToString("HH:mm", CultureInfo.InvariantCulture);
             DayOfWeekComboBox.SelectedItem = profile.Schedule.DayOfWeek;
-            IntervalHoursTextBox.Text = profile.Schedule.IntervalHours.ToString(CultureInfo.InvariantCulture);
+            IntervalHoursTextBox.Text = profile.Schedule.Cadence == ScheduleCadence.Minutes
+                ? profile.Schedule.IntervalMinutes.ToString(CultureInfo.InvariantCulture)
+                : profile.Schedule.IntervalHours.ToString(CultureInfo.InvariantCulture);
+            UpdateIntervalLabel(profile.Schedule.Cadence);
             ScheduleEnabledCheckBox.IsChecked = profile.Schedule.Enabled;
             DryRunCheckBox.IsChecked = profile.DryRun;
             MirrorDeletesCheckBox.IsChecked = profile.MirrorDeletes;
@@ -464,6 +507,8 @@ public partial class MainWindow : Window
             NextRunTextBlock.Text = "";
             LastRunTextBlock.Text = "";
             ShowLatestRun(profile);
+            ShowAvailability(_availabilityChecker.Check(profile));
+            DriveSecurityTextBlock.Text = "Drive security not checked.";
             UpdateActionSurface(profile, _currentTaskSnapshot);
         }
         finally
@@ -522,13 +567,20 @@ public partial class MainWindow : Window
 
         selectedProfile.Schedule.TimeOfDay = timeOfDay;
 
-        if (!int.TryParse(IntervalHoursTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var intervalHours))
+        if (!int.TryParse(IntervalHoursTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var interval))
         {
-            ShowStatus("Hourly interval must be a number.", false);
+            ShowStatus("Interval must be a number.", false);
             return false;
         }
 
-        selectedProfile.Schedule.IntervalHours = intervalHours;
+        if (selectedProfile.Schedule.Cadence == ScheduleCadence.Minutes)
+        {
+            selectedProfile.Schedule.IntervalMinutes = interval;
+        }
+        else
+        {
+            selectedProfile.Schedule.IntervalHours = interval;
+        }
 
         var issues = BackupProfileValidator.Validate(selectedProfile);
         if (issues.Count > 0)
@@ -539,6 +591,7 @@ public partial class MainWindow : Window
 
         profile = selectedProfile;
         ProfilesList.Items.Refresh();
+        ShowAvailability(_availabilityChecker.Check(profile));
         UpdateActionSurface(profile, _currentTaskSnapshot);
         return true;
     }
@@ -575,6 +628,16 @@ public partial class MainWindow : Window
             .ToList();
     }
 
+    private void UpdateIntervalLabel(ScheduleCadence cadence)
+    {
+        IntervalLabel.Content = cadence switch
+        {
+            ScheduleCadence.Minutes => "Minute interval",
+            ScheduleCadence.Hourly => "Hourly interval",
+            _ => "Interval"
+        };
+    }
+
     private static void BrowseForFolder(System.Windows.Controls.TextBox target)
     {
         using var dialog = new WinForms.FolderBrowserDialog
@@ -597,13 +660,97 @@ public partial class MainWindow : Window
             : (System.Windows.Media.Brush)FindResource("StatusErrorBrush");
     }
 
+    private void ShowAvailability(ProfileAvailabilityReport report)
+    {
+        AvailabilityTextBlock.Text = report.Summary;
+        AvailabilityTextBlock.Foreground = report.HasErrors
+            ? (System.Windows.Media.Brush)FindResource("StatusErrorBrush")
+            : report.HasWarnings
+                ? (System.Windows.Media.Brush)FindResource("WarningBrush")
+                : (System.Windows.Media.Brush)FindResource("TextMutedBrush");
+    }
+
+    private async Task RefreshDriveSecurityAsync(BackupProfile profile)
+    {
+        var profileId = profile.Id;
+        DriveSecurityTextBlock.Text = "Drive security: checking...";
+        DriveSecurityTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
+
+        try
+        {
+            var report = await _driveSecurityChecker.CheckAsync(profile);
+            if (GetSelectedProfile(showStatus: false)?.Id != profileId)
+            {
+                return;
+            }
+
+            ShowDriveSecurity(report);
+        }
+        catch (Exception exception)
+        {
+            if (GetSelectedProfile(showStatus: false)?.Id != profileId)
+            {
+                return;
+            }
+
+            DriveSecurityTextBlock.Text = $"Drive security: check failed. {exception.Message}";
+            DriveSecurityTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("WarningBrush");
+        }
+    }
+
+    private void ShowDriveSecurity(ProfileDriveSecurityReport report)
+    {
+        DriveSecurityTextBlock.Text = report.Summary;
+        DriveSecurityTextBlock.Foreground = report.HasErrors
+            ? (System.Windows.Media.Brush)FindResource("StatusErrorBrush")
+            : report.HasWarnings
+                ? (System.Windows.Media.Brush)FindResource("WarningBrush")
+                : (System.Windows.Media.Brush)FindResource("TextMutedBrush");
+    }
+
+    private void ShowShuttleProgress(ShuttleOperationProgress progress)
+    {
+        if (progress.TotalFiles <= 0)
+        {
+            ActivityProgressBar.IsIndeterminate = true;
+        }
+        else
+        {
+            ActivityProgressBar.IsIndeterminate = false;
+            ActivityProgressBar.Minimum = 0;
+            ActivityProgressBar.Maximum = progress.TotalFiles;
+            ActivityProgressBar.Value = Math.Min(progress.ProcessedFiles, progress.TotalFiles);
+        }
+
+        ShowStatus(
+            progress.TotalFiles <= 0
+                ? progress.Message
+                : $"{progress.Message} {progress.PercentComplete:0}%",
+            true);
+    }
+
     private async Task RunBusyAsync(string busyMessage, Func<Task> operation)
     {
+        await RunBusyAsync(busyMessage, _ => operation(), canCancel: false);
+    }
+
+    private async Task RunBusyAsync(
+        string busyMessage,
+        Func<CancellationToken, Task> operation,
+        bool canCancel)
+    {
+        using var cancellationSource = new CancellationTokenSource();
+        _currentOperationCancellationSource = canCancel ? cancellationSource : null;
         SetBusy(true, busyMessage);
 
         try
         {
-            await operation();
+            await operation(cancellationSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            AppendOutput("Operation canceled by user.");
+            ShowStatus("Operation canceled.", false);
         }
         catch (Exception exception)
         {
@@ -612,6 +759,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _currentOperationCancellationSource = null;
             SetBusy(false, "");
         }
     }
@@ -622,6 +770,8 @@ public partial class MainWindow : Window
         ActivityProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ActivityProgressBar.IsIndeterminate = busy;
         UpdateActionSurface(GetSelectedProfile(showStatus: false), _currentTaskSnapshot);
+        CancelOperationButton.Visibility = busy && _currentOperationCancellationSource is not null ? Visibility.Visible : Visibility.Collapsed;
+        CancelOperationButton.IsEnabled = busy && _currentOperationCancellationSource is not null && !_currentOperationCancellationSource.IsCancellationRequested;
 
         if (busy)
         {
@@ -659,6 +809,8 @@ public partial class MainWindow : Window
         SetButton(DisableTaskButton, taskExists && taskState == ScheduledTaskState.Ready, enabledWhenIdle: true);
         SetButton(RemoveTaskButton, taskExists && !taskRunning, enabledWhenIdle: true);
         SetButton(RefreshStatusButton, supportsScheduledTask, enabledWhenIdle: true);
+        CancelOperationButton.Visibility = _isBusy && _currentOperationCancellationSource is not null ? Visibility.Visible : Visibility.Collapsed;
+        CancelOperationButton.IsEnabled = _isBusy && _currentOperationCancellationSource is not null && !_currentOperationCancellationSource.IsCancellationRequested;
 
         SetButton(PrepareShuttleButton, isShuttleProfile, enabledWhenIdle: true);
         SetButton(DepartShuttleButton, isShuttleProfile, enabledWhenIdle: true);

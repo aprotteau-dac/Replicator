@@ -11,6 +11,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Themes\Brand\logo\replicator.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

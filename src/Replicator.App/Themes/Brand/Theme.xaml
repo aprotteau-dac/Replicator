@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Replicator · Theme.xaml · v1.0
+  Industrial Red · Bone ink · Interlock mark
+  Drop this dictionary into App.xaml first (before Icons.xaml / Logo.xaml).
+
+  Naming:
+    Color.*           raw Color resources
+    Brush.*           SolidColorBrush resources (use these in styles)
+    Type.*            FontFamily + style resources
+    Text.*            text/run styles
+    Surface.*         border + background styles
+    Button.*          control templates
+    Status.*          status text colors (OK / Wait / Alarm / Danger)
+
+  Fonts: drop SpaceGrotesk-*.ttf and JetBrainsMono-*.ttf into a `Fonts/` folder
+  in the app project (Build Action = Resource) and the FontFamily references
+  below will resolve. Otherwise the system fallback will be used.
+-->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+  <!-- ───────────────────────────────────────────────── -->
+  <!-- COLORS                                            -->
+  <!-- ───────────────────────────────────────────────── -->
+
+  <!-- Surface -->
+  <Color x:Key="Color.Bg.Floor">#0E0D0C</Color>
+  <Color x:Key="Color.Bg.Panel">#171513</Color>
+  <Color x:Key="Color.Bg.Raise">#1F1C19</Color>
+  <Color x:Key="Color.Bg.RaisePlus">#272320</Color>
+
+  <!-- Ink -->
+  <Color x:Key="Color.Ink.Bone">#F0E9D3</Color>
+  <Color x:Key="Color.Ink.BoneMute">#99F0E9D3</Color>  <!-- 60% alpha -->
+  <Color x:Key="Color.Ink.BoneDim">#52F0E9D3</Color>   <!-- 32% alpha -->
+
+  <!-- Brand -->
+  <Color x:Key="Color.Red.Primary">#D23A2A</Color>
+  <Color x:Key="Color.Red.Deep">#5A1810</Color>
+
+  <!-- Status -->
+  <Color x:Key="Color.Status.Ok">#D8D2BD</Color>       <!-- bone -->
+  <Color x:Key="Color.Status.Wait">#D23A2A</Color>     <!-- = red -->
+  <Color x:Key="Color.Status.Alarm">#FFB35C</Color>    <!-- warm amber -->
+  <Color x:Key="Color.Status.Danger">#D23A2A</Color>   <!-- = red, sharper context -->
+  <Color x:Key="Color.Status.Info">#A8B8C4</Color>
+
+  <!-- Lines -->
+  <Color x:Key="Color.Line">#14F0E9D3</Color>          <!-- 8% bone -->
+  <Color x:Key="Color.Line.Hi">#2EF0E9D3</Color>       <!-- 18% bone -->
+
+  <!-- ───────────────────────────────────────────────── -->
+  <!-- BRUSHES — use these everywhere in styles          -->
+  <!-- ───────────────────────────────────────────────── -->
+
+  <SolidColorBrush x:Key="Brush.Bg.Floor"      Color="{StaticResource Color.Bg.Floor}"/>
+  <SolidColorBrush x:Key="Brush.Bg.Panel"      Color="{StaticResource Color.Bg.Panel}"/>
+  <SolidColorBrush x:Key="Brush.Bg.Raise"      Color="{StaticResource Color.Bg.Raise}"/>
+  <SolidColorBrush x:Key="Brush.Bg.RaisePlus"  Color="{StaticResource Color.Bg.RaisePlus}"/>
+
+  <SolidColorBrush x:Key="Brush.Ink.Bone"      Color="{StaticResource Color.Ink.Bone}"/>
+  <SolidColorBrush x:Key="Brush.Ink.Mute"      Color="{StaticResource Color.Ink.BoneMute}"/>
+  <SolidColorBrush x:Key="Brush.Ink.Dim"       Color="{StaticResource Color.Ink.BoneDim}"/>
+
+  <!-- Icon brushes: separate keys so app theming can swap them
+       without disturbing text. -->
+  <SolidColorBrush x:Key="Brush.Ink.Icon"      Color="{StaticResource Color.Ink.Bone}"/>
+  <SolidColorBrush x:Key="Brush.Ink.IconSoft"  Color="{StaticResource Color.Ink.BoneMute}"/>
+
+  <SolidColorBrush x:Key="Brush.Red.Primary"   Color="{StaticResource Color.Red.Primary}"/>
+  <SolidColorBrush x:Key="Brush.Red.Deep"      Color="{StaticResource Color.Red.Deep}"/>
+
+  <SolidColorBrush x:Key="Brush.Status.Ok"     Color="{StaticResource Color.Status.Ok}"/>
+  <SolidColorBrush x:Key="Brush.Status.Wait"   Color="{StaticResource Color.Status.Wait}"/>
+  <SolidColorBrush x:Key="Brush.Status.Alarm"  Color="{StaticResource Color.Status.Alarm}"/>
+  <SolidColorBrush x:Key="Brush.Status.Danger" Color="{StaticResource Color.Status.Danger}"/>
+  <SolidColorBrush x:Key="Brush.Status.Info"   Color="{StaticResource Color.Status.Info}"/>
+
+  <SolidColorBrush x:Key="Brush.Line"          Color="{StaticResource Color.Line}"/>
+  <SolidColorBrush x:Key="Brush.Line.Hi"       Color="{StaticResource Color.Line.Hi}"/>
+
+  <!-- Convenience: button foreground when bg = red -->
+  <SolidColorBrush x:Key="Brush.OnRed"         Color="{StaticResource Color.Bg.Floor}"/>
+
+  <!-- ───────────────────────────────────────────────── -->
+  <!-- TYPE                                              -->
+  <!-- ───────────────────────────────────────────────── -->
+
+  <!-- Pack URI loads from a Fonts/ folder packed as a Resource.
+       Fallback chain at the end picks up if the file isn't present. -->
+  <FontFamily x:Key="Type.Display">pack://application:,,,/Fonts/#Space Grotesk, Segoe UI, system-ui</FontFamily>
+  <FontFamily x:Key="Type.Mono">pack://application:,,,/Fonts/#JetBrains Mono, Cascadia Mono, Consolas, monospace</FontFamily>
+
+  <!-- Sizes -->
+  <sys:Double x:Key="Type.Size.Display">64</sys:Double>
+  <sys:Double x:Key="Type.Size.Title">28</sys:Double>
+  <sys:Double x:Key="Type.Size.Body">14</sys:Double>
+  <sys:Double x:Key="Type.Size.Label">11</sys:Double>
+  <sys:Double x:Key="Type.Size.Figures">22</sys:Double>
+
+  <!-- Reusable text styles -->
+  <Style x:Key="Text.Display" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Type.Display}"/>
+    <Setter Property="FontWeight" Value="Bold"/>
+    <Setter Property="FontSize" Value="{StaticResource Type.Size.Display}"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Ink.Bone}"/>
+  </Style>
+
+  <Style x:Key="Text.Title" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Type.Mono}"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="FontSize" Value="{StaticResource Type.Size.Title}"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Ink.Bone}"/>
+  </Style>
+
+  <Style x:Key="Text.Body" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Type.Mono}"/>
+    <Setter Property="FontSize" Value="{StaticResource Type.Size.Body}"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Ink.Bone}"/>
+    <Setter Property="LineHeight" Value="22"/>
+  </Style>
+
+  <Style x:Key="Text.Label" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Type.Mono}"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="FontSize" Value="{StaticResource Type.Size.Label}"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Ink.Mute}"/>
+    <!-- LetterSpacing in WPF: use Typography.* or TextOptions; closest equivalent: -->
+    <Setter Property="Typography.Capitals" Value="AllSmallCaps"/>
+  </Style>
+
+  <Style x:Key="Text.Figures" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Type.Mono}"/>
+    <Setter Property="FontSize" Value="{StaticResource Type.Size.Figures}"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Red.Primary}"/>
+    <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
+  </Style>
+
+  <!-- Status text — colored by state, mono everywhere -->
+  <Style x:Key="Text.Status" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Type.Mono}"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="FontSize" Value="11"/>
+  </Style>
+
+  <!-- ───────────────────────────────────────────────── -->
+  <!-- SURFACES                                          -->
+  <!-- ───────────────────────────────────────────────── -->
+
+  <Style x:Key="Surface.Panel" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Panel}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Line}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="0"/>
+  </Style>
+
+  <Style x:Key="Surface.Raised" TargetType="Border" BasedOn="{StaticResource Surface.Panel}">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Raise}"/>
+  </Style>
+
+  <!-- ───────────────────────────────────────────────── -->
+  <!-- BUTTONS                                           -->
+  <!-- ───────────────────────────────────────────────── -->
+
+  <Style x:Key="Button.Primary" TargetType="Button">
+    <Setter Property="Background" Value="{DynamicResource Brush.Red.Primary}"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.OnRed}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Red.Primary}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="18,10"/>
+    <Setter Property="FontFamily" Value="{StaticResource Type.Mono}"/>
+    <Setter Property="FontWeight" Value="Bold"/>
+    <Setter Property="FontSize" Value="11"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="b" Background="{TemplateBinding Background}"
+                              BorderBrush="{TemplateBinding BorderBrush}"
+                              BorderThickness="{TemplateBinding BorderThickness}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="b" Property="Background" Value="{DynamicResource Brush.Red.Deep}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="b" Property="Opacity" Value="0.4"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Button.Secondary" TargetType="Button" BasedOn="{StaticResource Button.Primary}">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Ink.Bone}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Line.Hi}"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="b" Background="{TemplateBinding Background}"
+                              BorderBrush="{TemplateBinding BorderBrush}"
+                              BorderThickness="{TemplateBinding BorderThickness}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="b" Property="Background" Value="{DynamicResource Brush.Bg.Raise}"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- ───────────────────────────────────────────────── -->
+  <!-- SCROLLBARS — keep thin, mono                      -->
+  <!-- ───────────────────────────────────────────────── -->
+
+  <Style TargetType="ScrollBar">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Ink.Dim}"/>
+    <Setter Property="Width" Value="8"/>
+  </Style>
+
+</ResourceDictionary>

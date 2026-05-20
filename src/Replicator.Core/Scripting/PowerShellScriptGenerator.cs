@@ -123,6 +123,18 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
                 $status | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $StatusPath -Encoding UTF8
             }
 
+            function Test-RootAvailable {
+                param(
+                    [string] $Label,
+                    [string] $Path
+                )
+
+                $root = [System.IO.Path]::GetPathRoot($Path)
+                if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) {
+                    throw "$Label drive is unavailable: $root"
+                }
+            }
+
             New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
 
             $StartedAt = Get-Date
@@ -147,8 +159,11 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
             Write-Status -Message 'Started.' -ExitCode $null -Succeeded $false
 
             try {
+                Test-RootAvailable -Label 'Source' -Path $Source
+                Test-RootAvailable -Label 'Target' -Path $Destination
+
                 if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
-                    throw "Source path does not exist or is not a directory: $Source"
+                    throw "Source path is unavailable: $Source"
                 }
 
                 if (-not $effectiveDryRun) {

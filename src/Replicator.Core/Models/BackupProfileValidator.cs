@@ -50,6 +50,11 @@ public static class BackupProfileValidator
             issues.Add(new(nameof(profile.Schedule.IntervalHours), "Hourly interval must be between 1 and 23."));
         }
 
+        if (profile.Schedule.Cadence == ScheduleCadence.Minutes && profile.Schedule.IntervalMinutes is < 1 or > 1439)
+        {
+            issues.Add(new(nameof(profile.Schedule.IntervalMinutes), "Minute interval must be between 1 and 1439."));
+        }
+
         return issues;
     }
 

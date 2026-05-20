@@ -11,4 +11,6 @@ public sealed class BackupSchedule
     public DayOfWeek DayOfWeek { get; set; } = DayOfWeek.Monday;
 
     public int IntervalHours { get; set; } = 6;
+
+    public int IntervalMinutes { get; set; } = 15;
 }

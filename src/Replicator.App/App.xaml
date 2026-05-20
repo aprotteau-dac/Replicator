@@ -5,7 +5,11 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/SolarizedFluentDark.xaml" />
+                <ResourceDictionary Source="Themes/Brand/Theme.xaml" />
+                <ResourceDictionary Source="Themes/Brand/Compatibility.xaml" />
+                <ResourceDictionary Source="Themes/Brand/AppControls.xaml" />
+                <ResourceDictionary Source="Themes/Brand/Icons.xaml" />
+                <ResourceDictionary Source="Themes/Brand/Logo.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

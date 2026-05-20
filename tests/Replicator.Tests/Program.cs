@@ -1,6 +1,8 @@
+using Replicator.Core.Availability;
 using Replicator.Core.Models;
 using Replicator.Core.Scheduling;
 using Replicator.Core.Scripting;
+using Replicator.Core.Security;
 using Replicator.Core.Shuttle;
 using Replicator.Core.Storage;
 
@@ -11,8 +13,16 @@ var tests = new (string Name, Func<Task> Test)[]
     ("log reader summarizes latest robocopy log", LogReaderSummarizesLatestRobocopyLog),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
+    ("shuttle prepare reports file progress", ShuttlePrepareReportsFileProgress),
+    ("shuttle operations honor cancellation", ShuttleOperationsHonorCancellation),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
-    ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes)
+    ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
+    ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes),
+    ("validator rejects invalid minute interval", ValidatorRejectsInvalidMinuteInterval),
+    ("availability checker reports missing source and creatable target", AvailabilityCheckerReportsMissingSourceAndCreatableTarget),
+    ("availability checker reports unavailable drive", AvailabilityCheckerReportsUnavailableDrive),
+    ("bitlocker parser classifies protected unprotected and locked drives", BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives),
+    ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
 
 var failures = 0;
@@ -207,6 +217,110 @@ static async Task ShuttlePrepareDepartDockReceivePreservesConflicts()
     }
 }
 
+static async Task ShuttlePrepareReportsFileProgress()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+
+    Directory.CreateDirectory(source);
+
+    try
+    {
+        File.WriteAllText(Path.Combine(source, "one.md"), "one");
+        Directory.CreateDirectory(Path.Combine(source, "notes"));
+        File.WriteAllText(Path.Combine(source, "notes", "two.md"), "two");
+
+        var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+        var service = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+        var progressEvents = new System.Collections.Concurrent.ConcurrentQueue<ShuttleOperationProgress>();
+        var progress = new Progress<ShuttleOperationProgress>(progressEvents.Enqueue);
+
+        var result = await service.PrepareAsync(profile, progress);
+        for (var attempt = 0; attempt < 20 && !progressEvents.Any(item => item.Operation == ShuttleOperationKind.Prepare && item.TotalFiles == 2 && item.ProcessedFiles == 2); attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert(result.Succeeded, result.Message);
+        Assert(progressEvents.Any(item => item.Operation == ShuttleOperationKind.Prepare && item.TotalFiles == 2), "Expected prepare progress to include total file count.");
+
+        var maxProcessed = progressEvents
+            .Where(item => item.Operation == ShuttleOperationKind.Prepare && item.TotalFiles == 2)
+            .Max(item => item.ProcessedFiles);
+
+        Assert(maxProcessed == 2, $"Expected max processed file count to be 2, got {maxProcessed}.");
+        Assert(progressEvents.Any(item => item.Operation == ShuttleOperationKind.Prepare && item.PercentComplete == 100), "Expected a 100% progress event.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttleOperationsHonorCancellation()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+
+    Directory.CreateDirectory(source);
+
+    try
+    {
+        File.WriteAllText(Path.Combine(source, "one.md"), "one");
+
+        var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+        var service = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+
+        await AssertCanceled(
+            token => service.PrepareAsync(profile, progress: null, cancellationToken: token),
+            "Expected Prepare Shuttle to honor cancellation.");
+        await AssertCanceled(
+            token => service.DepartAsync(profile, progress: null, cancellationToken: token),
+            "Expected Depart to honor cancellation.");
+        await AssertCanceled(
+            token => service.DockAsync(profile, progress: null, cancellationToken: token),
+            "Expected Dock Shuttle to honor cancellation.");
+        await AssertCanceled(
+            token => service.ReceiveAsync(profile, progress: null, cancellationToken: token),
+            "Expected Receive Changes to honor cancellation.");
+
+        var manifestsDirectory = Path.Combine(shuttleRoot, "manifests");
+        var manifestCount = Directory.Exists(manifestsDirectory)
+            ? Directory.EnumerateFiles(manifestsDirectory, "*.json").Count()
+            : 0;
+
+        Assert(manifestCount == 0, "Expected canceled prepare to avoid writing manifests.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task AssertCanceled(Func<CancellationToken, Task> operation, string message)
+{
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+
+    try
+    {
+        await operation(cancellation.Token);
+        throw new InvalidOperationException(message);
+    }
+    catch (OperationCanceledException)
+    {
+        // Expected path.
+    }
+}
+
 static Task ScheduledTaskNamesAreScoped()
 {
     var profile = ValidProfile();
@@ -216,6 +330,21 @@ static Task ScheduledTaskNamesAreScoped()
     var taskName = ScheduledTaskName.ForProfile(profile);
 
     Assert(taskName == @"\Replicator\AI-Scratch-Repo-Backup-00112233", $"Unexpected task name: {taskName}");
+    return Task.CompletedTask;
+}
+
+static Task MinuteSchedulesEmitSchtasksMinuteCadence()
+{
+    var profile = ValidProfile();
+    profile.Schedule.Cadence = ScheduleCadence.Minutes;
+    profile.Schedule.IntervalMinutes = 15;
+
+    var arguments = BuildScheduledTaskArguments(profile);
+
+    Assert(arguments.Contains("/SC"), "Expected schtasks schedule switch.");
+    Assert(arguments.Contains("MINUTE"), "Expected minute schedule cadence.");
+    Assert(arguments.Contains("/MO"), "Expected schedule modifier switch.");
+    Assert(arguments.Contains("15"), "Expected 15-minute schedule modifier.");
     return Task.CompletedTask;
 }
 
@@ -230,6 +359,153 @@ static Task DefaultProfileHasDevelopmentExcludes()
     Assert(profile.ExcludePatterns.Contains(".replicator-conflicts"), "Expected conflict folder exclude.");
 
     return Task.CompletedTask;
+}
+
+static Task ValidatorRejectsInvalidMinuteInterval()
+{
+    var profile = ValidProfile();
+    profile.Schedule.Cadence = ScheduleCadence.Minutes;
+    profile.Schedule.IntervalMinutes = 0;
+
+    var issues = BackupProfileValidator.Validate(profile);
+
+    Assert(issues.Any(issue => issue.Field == "IntervalMinutes"), "Expected invalid minute interval validation issue.");
+    return Task.CompletedTask;
+}
+
+static Task AvailabilityCheckerReportsMissingSourceAndCreatableTarget()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "missing-source");
+    var destination = Path.Combine(root, "backup", "repo");
+
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var profile = ValidProfile();
+        profile.SourcePath = source;
+        profile.Target.Path = destination;
+
+        var report = new ProfileAvailabilityChecker().Check(profile);
+
+        Assert(report.HasErrors, "Expected missing source to be an availability error.");
+        Assert(report.HasWarnings, "Expected missing but creatable target to be an availability warning.");
+        Assert(report.Items.Any(item => item.Label == "Source" && item.State == PathAvailabilityState.Missing), "Expected missing source state.");
+        Assert(report.Items.Any(item => item.Label == "Target" && item.State == PathAvailabilityState.Creatable), "Expected creatable target state.");
+        Assert(report.Summary.Contains("Source path is unavailable", StringComparison.OrdinalIgnoreCase), $"Unexpected summary: {report.Summary}");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task AvailabilityCheckerReportsUnavailableDrive()
+{
+    var unavailableRoot = FindUnavailableDriveRoot();
+    if (unavailableRoot is null)
+    {
+        Console.WriteLine("SKIP no unused Windows drive letter available for unavailable-drive availability check");
+        return Task.CompletedTask;
+    }
+
+    var profile = ValidProfile();
+    profile.SourcePath = Path.Combine(unavailableRoot, "source");
+    profile.Target.Path = Path.Combine(unavailableRoot, "target");
+
+    var report = new ProfileAvailabilityChecker().Check(profile);
+
+    Assert(report.HasErrors, "Expected unavailable drive to be an availability error.");
+    Assert(report.Items.Any(item => item.State == PathAvailabilityState.DriveUnavailable), "Expected drive unavailable state.");
+    Assert(report.Summary.Contains("drive is unavailable", StringComparison.OrdinalIgnoreCase), $"Unexpected summary: {report.Summary}");
+    return Task.CompletedTask;
+}
+
+static Task BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives()
+{
+    const string protectedJson = """
+        {"MountPoint":"D:","VolumeStatus":"FullyEncrypted","ProtectionStatus":"On","LockStatus":"Unlocked","EncryptionPercentage":100}
+        """;
+    const string unprotectedJson = """
+        {"MountPoint":"E:","VolumeStatus":"FullyDecrypted","ProtectionStatus":"Off","LockStatus":"Unlocked","EncryptionPercentage":0}
+        """;
+    const string lockedJson = """
+        {"MountPoint":"F:","VolumeStatus":"FullyEncrypted","ProtectionStatus":"On","LockStatus":"Locked","EncryptionPercentage":100}
+        """;
+
+    Assert(BitLockerStatusParser.TryParseJson(protectedJson, out var protectedStatus), "Expected protected BitLocker JSON to parse.");
+    Assert(BitLockerStatusParser.TryParseJson(unprotectedJson, out var unprotectedStatus), "Expected unprotected BitLocker JSON to parse.");
+    Assert(BitLockerStatusParser.TryParseJson(lockedJson, out var lockedStatus), "Expected locked BitLocker JSON to parse.");
+
+    var protectedItem = BitLockerStatusParser.ToSecurityItem("Target drive", @"D:\backup", @"D:\", protectedStatus);
+    var unprotectedItem = BitLockerStatusParser.ToSecurityItem("Target drive", @"E:\backup", @"E:\", unprotectedStatus);
+    var lockedItem = BitLockerStatusParser.ToSecurityItem("Shuttle drive", @"F:\Replicator\shuttle", @"F:\", lockedStatus);
+
+    Assert(protectedItem.State == DriveSecurityState.Protected, "Expected protected state.");
+    Assert(protectedItem.Severity == DriveSecuritySeverity.Info, "Expected protected drive to be informational.");
+    Assert(unprotectedItem.State == DriveSecurityState.Unprotected, "Expected unprotected state.");
+    Assert(unprotectedItem.Severity == DriveSecuritySeverity.Warning, "Expected unprotected drive to warn.");
+    Assert(lockedItem.State == DriveSecurityState.Locked, "Expected locked state.");
+    Assert(lockedItem.Severity == DriveSecuritySeverity.Error, "Expected locked drive to error.");
+    return Task.CompletedTask;
+}
+
+static async Task ProfileDriveSecurityCheckerSummarizesBitLockerPosture()
+{
+    var profile = ValidProfile();
+    profile.SourcePath = @"C:\work\scratch";
+    profile.Target.Path = @"D:\backups\scratch";
+
+    var provider = new FakeBitLockerStatusProvider();
+    provider.Items[@"C:\"] = new DriveSecurityItem(
+        "Source drive",
+        profile.SourcePath,
+        @"C:\",
+        DriveSecurityState.Protected,
+        DriveSecuritySeverity.Info,
+        @"Drive security: Source drive is BitLocker protected (C:\).");
+    provider.Items[@"D:\"] = new DriveSecurityItem(
+        "Target drive",
+        profile.Target.Path,
+        @"D:\",
+        DriveSecurityState.Unprotected,
+        DriveSecuritySeverity.Warning,
+        @"Drive security: Target drive is not BitLocker protected (D:\).");
+
+    var report = await new ProfileDriveSecurityChecker(provider).CheckAsync(profile);
+
+    Assert(report.HasWarnings, "Expected unprotected target drive to warn.");
+    Assert(report.Items.Count == 2, "Expected source and target drive security items.");
+    Assert(report.Summary.Contains("Target drive is not BitLocker protected", StringComparison.OrdinalIgnoreCase), $"Unexpected security summary: {report.Summary}");
+}
+
+static string? FindUnavailableDriveRoot()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return null;
+    }
+
+    var existing = DriveInfo
+        .GetDrives()
+        .Select(drive => char.ToUpperInvariant(drive.Name[0]))
+        .ToHashSet();
+
+    for (var letter = 'Z'; letter >= 'G'; letter--)
+    {
+        if (!existing.Contains(letter))
+        {
+            return $"{letter}:\\";
+        }
+    }
+
+    return null;
 }
 
 static BackupProfile ValidProfile()
@@ -288,5 +564,35 @@ static void Assert(bool condition, string message)
     if (!condition)
     {
         throw new InvalidOperationException(message);
+    }
+}
+
+static IReadOnlyList<string> BuildScheduledTaskArguments(BackupProfile profile)
+{
+    var method = typeof(WindowsScheduledTaskService).GetMethod(
+        "BuildCreateArguments",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+    if (method is null)
+    {
+        throw new InvalidOperationException("Expected scheduled task argument builder.");
+    }
+
+    return (IReadOnlyList<string>)method.Invoke(null, [profile, @"C:\Replicator\profile.ps1", ScheduledTaskName.ForProfile(profile)])!;
+}
+
+sealed class FakeBitLockerStatusProvider : IBitLockerStatusProvider
+{
+    public Dictionary<string, DriveSecurityItem> Items { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<DriveSecurityItem> CheckAsync(
+        string label,
+        string path,
+        string root,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.TryGetValue(root, out var item)
+            ? item
+            : new DriveSecurityItem(label, path, root, DriveSecurityState.Unknown, DriveSecuritySeverity.Warning, $"Unknown: {root}"));
     }
 }

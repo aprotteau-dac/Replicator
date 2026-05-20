@@ -13,13 +13,18 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public async Task<ShuttleOperationResult> PrepareAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    public async Task<ShuttleOperationResult> PrepareAsync(
+        BackupProfile profile,
+        IProgress<ShuttleOperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var validation = ValidateShuttleProfile(profile);
         if (validation is not null)
         {
             return validation;
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         var startedAt = DateTimeOffset.UtcNow;
         var paths = ShuttlePaths.FromProfile(profile);
@@ -47,13 +52,19 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return new ShuttleOperationResult(false, $"Source path is unavailable: {profile.SourcePath}", null);
         }
 
+        ReportProgress(progress, ShuttleOperationKind.Prepare, 0, 0, "Scanning source files...");
+        var sourceFiles = EnumerateSourceFiles(profile, cancellationToken).ToList();
         var manifest = CreateManifest(profile, paths, ShuttleOperationKind.Prepare, readyToDock: false, startedAt);
         var details = new List<string>();
+        var processedFiles = 0;
 
-        foreach (var sourceFile in EnumerateSourceFiles(profile))
+        ReportProgress(progress, ShuttleOperationKind.Prepare, 0, sourceFiles.Count, "Preparing shuttle payload...");
+
+        foreach (var sourceFile in sourceFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            processedFiles++;
             manifest.TotalFiles++;
             var relativePath = Path.GetRelativePath(profile.SourcePath, sourceFile);
             var payloadPath = Path.Combine(paths.PayloadDirectory, relativePath);
@@ -86,9 +97,17 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             {
                 details.Add($"{(profile.DryRun ? "Would stage" : "Staged")} {relativePath}");
             }
+
+            ReportFileProgress(
+                progress,
+                ShuttleOperationKind.Prepare,
+                processedFiles,
+                sourceFiles.Count,
+                $"{(profile.DryRun ? "Previewed" : "Staged")} {processedFiles} of {sourceFiles.Count} files.");
         }
 
         manifest.CompletedAt = DateTimeOffset.UtcNow;
+        ReportProgress(progress, ShuttleOperationKind.Prepare, sourceFiles.Count, sourceFiles.Count, "Prepare Shuttle completed.");
 
         if (profile.DryRun)
         {
@@ -109,13 +128,18 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             string.Join(Environment.NewLine, details));
     }
 
-    public async Task<ShuttleOperationResult> DepartAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    public async Task<ShuttleOperationResult> DepartAsync(
+        BackupProfile profile,
+        IProgress<ShuttleOperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var validation = ValidateShuttleProfile(profile);
         if (validation is not null)
         {
             return validation;
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         var paths = ShuttlePaths.FromProfile(profile);
         var availability = CheckShuttleAvailability(paths);
@@ -125,6 +149,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         }
 
         paths.EnsureCreated();
+        ReportProgress(progress, ShuttleOperationKind.Depart, 0, 0, "Reading prepared shuttle payload...");
 
         var preparedManifest = await ReadStateManifestAsync(paths, $"latest-prepare-{machineIdentity.MachineId}.json", cancellationToken);
         if (preparedManifest is null)
@@ -137,6 +162,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
         await WriteManifestAsync(paths, departManifest, cancellationToken);
         await WriteStateManifestAsync(paths, "latest-depart.json", departManifest, cancellationToken);
+        ReportProgress(progress, ShuttleOperationKind.Depart, 1, 1, "Depart completed.");
 
         return new ShuttleOperationResult(
             true,
@@ -144,13 +170,18 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             departManifest);
     }
 
-    public async Task<ShuttleOperationResult> DockAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    public async Task<ShuttleOperationResult> DockAsync(
+        BackupProfile profile,
+        IProgress<ShuttleOperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var validation = ValidateShuttleProfile(profile);
         if (validation is not null)
         {
             return validation;
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         var paths = ShuttlePaths.FromProfile(profile);
         var availability = CheckShuttleAvailability(paths);
@@ -165,7 +196,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return new ShuttleOperationResult(true, "No inbound shuttle changes are waiting for this machine.", inboundManifest);
         }
 
-        var analysis = AnalyzeInbound(profile, paths, inboundManifest);
+        var analysis = AnalyzeInbound(profile, paths, inboundManifest, progress, cancellationToken);
         return new ShuttleOperationResult(
             true,
             $"Docked shuttle from {inboundManifest.FromMachineName}. Review the inbound summary before receiving changes.",
@@ -173,13 +204,18 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             BuildInboundDetails(analysis));
     }
 
-    public async Task<ShuttleOperationResult> ReceiveAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    public async Task<ShuttleOperationResult> ReceiveAsync(
+        BackupProfile profile,
+        IProgress<ShuttleOperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var validation = ValidateShuttleProfile(profile);
         if (validation is not null)
         {
             return validation;
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         var paths = ShuttlePaths.FromProfile(profile);
         var availability = CheckShuttleAvailability(paths);
@@ -206,11 +242,18 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
         var conflictRoot = Path.Combine(paths.ConflictsDirectory, DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss"));
         var details = new List<string>();
+        var payloadFiles = Directory.Exists(paths.PayloadDirectory)
+            ? EnumerateFiles(paths.PayloadDirectory, cancellationToken).ToList()
+            : [];
+        var processedFiles = 0;
 
-        foreach (var payloadFile in Directory.EnumerateFiles(paths.PayloadDirectory, "*", SearchOption.AllDirectories))
+        ReportProgress(progress, ShuttleOperationKind.Receive, 0, payloadFiles.Count, "Receiving shuttle payload...");
+
+        foreach (var payloadFile in payloadFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            processedFiles++;
             receiveManifest.TotalFiles++;
             var relativePath = Path.GetRelativePath(paths.PayloadDirectory, payloadFile);
             var localPath = Path.Combine(profile.SourcePath, relativePath);
@@ -221,12 +264,14 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
                 receiveManifest.CopiedFiles++;
                 CopyFile(payloadFile, localPath);
                 AddDetail(details, $"Received new {relativePath}");
+                ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadFiles.Count, $"Received {processedFiles} of {payloadFiles.Count} files.");
                 continue;
             }
 
             if (FilesMatch(payloadFile, localPath))
             {
                 receiveManifest.SkippedFiles++;
+                ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadFiles.Count, $"Checked {processedFiles} of {payloadFiles.Count} files.");
                 continue;
             }
 
@@ -238,6 +283,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             CopyFile(localPath, conflictPath);
             CopyFile(payloadFile, localPath);
             AddDetail(details, $"Received changed {relativePath}; preserved local copy under conflicts.");
+            ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadFiles.Count, $"Received {processedFiles} of {payloadFiles.Count} files.");
         }
 
         receiveManifest.CompletedAt = DateTimeOffset.UtcNow;
@@ -246,6 +292,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             ReceivedMarkerPath(paths, inboundManifest),
             DateTimeOffset.UtcNow.ToString("O"),
             cancellationToken);
+        ReportProgress(progress, ShuttleOperationKind.Receive, payloadFiles.Count, payloadFiles.Count, "Receive completed.");
 
         return new ShuttleOperationResult(
             true,
@@ -312,7 +359,12 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         };
     }
 
-    private ShuttleManifest AnalyzeInbound(BackupProfile profile, ShuttlePaths paths, ShuttleManifest inboundManifest)
+    private ShuttleManifest AnalyzeInbound(
+        BackupProfile profile,
+        ShuttlePaths paths,
+        ShuttleManifest inboundManifest,
+        IProgress<ShuttleOperationProgress>? progress,
+        CancellationToken cancellationToken)
     {
         var manifest = CreateManifest(profile, paths, ShuttleOperationKind.Dock, readyToDock: inboundManifest.ReadyToDock, DateTimeOffset.UtcNow);
         manifest.FromMachineId = inboundManifest.FromMachineId;
@@ -326,8 +378,16 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return manifest;
         }
 
-        foreach (var payloadFile in Directory.EnumerateFiles(paths.PayloadDirectory, "*", SearchOption.AllDirectories))
+        var payloadFiles = EnumerateFiles(paths.PayloadDirectory, cancellationToken).ToList();
+        var processedFiles = 0;
+
+        ReportProgress(progress, ShuttleOperationKind.Dock, 0, payloadFiles.Count, "Analyzing inbound shuttle payload...");
+
+        foreach (var payloadFile in payloadFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            processedFiles++;
             manifest.TotalFiles++;
             var relativePath = Path.GetRelativePath(paths.PayloadDirectory, payloadFile);
             var localPath = Path.Combine(profile.SourcePath, relativePath);
@@ -345,22 +405,34 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             {
                 manifest.SkippedFiles++;
             }
+
+            ReportFileProgress(progress, ShuttleOperationKind.Dock, processedFiles, payloadFiles.Count, $"Analyzed {processedFiles} of {payloadFiles.Count} files.");
         }
 
         manifest.CompletedAt = DateTimeOffset.UtcNow;
+        ReportProgress(progress, ShuttleOperationKind.Dock, payloadFiles.Count, payloadFiles.Count, "Dock analysis completed.");
         return manifest;
     }
 
-    private IEnumerable<string> EnumerateSourceFiles(BackupProfile profile)
+    private IEnumerable<string> EnumerateSourceFiles(BackupProfile profile, CancellationToken cancellationToken)
     {
         var sourceRoot = Path.GetFullPath(Environment.ExpandEnvironmentVariables(profile.SourcePath));
-        foreach (var path in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+        foreach (var path in EnumerateFiles(sourceRoot, cancellationToken))
         {
             var relativePath = Path.GetRelativePath(sourceRoot, path);
             if (!IsExcluded(relativePath, profile.ExcludePatterns))
             {
                 yield return path;
             }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateFiles(string root, CancellationToken cancellationToken)
+    {
+        foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return path;
         }
     }
 
@@ -396,8 +468,11 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return false;
         }
 
-        return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(firstPath)))
-            .Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(secondPath))), StringComparison.OrdinalIgnoreCase);
+        using var firstStream = File.OpenRead(firstPath);
+        using var secondStream = File.OpenRead(secondPath);
+
+        return Convert.ToHexString(SHA256.HashData(firstStream))
+            .Equals(Convert.ToHexString(SHA256.HashData(secondStream)), StringComparison.OrdinalIgnoreCase);
     }
 
     private static void CopyFile(string sourcePath, string destinationPath)
@@ -457,6 +532,8 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         var manifests = new List<ShuttleManifest>();
         foreach (var path in Directory.EnumerateFiles(paths.ManifestsDirectory, "*.json"))
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             await using var stream = File.OpenRead(path);
             var manifest = await JsonSerializer.DeserializeAsync<ShuttleManifest>(stream, JsonOptions, cancellationToken);
             if (manifest?.ReadyToDock == true)
@@ -554,5 +631,28 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         var safe = new string(value.Select(character => invalid.Contains(character) ? '-' : character).ToArray());
         return string.IsNullOrWhiteSpace(safe) ? "machine" : safe;
+    }
+
+    private static void ReportProgress(
+        IProgress<ShuttleOperationProgress>? progress,
+        ShuttleOperationKind operation,
+        int processedFiles,
+        int totalFiles,
+        string message)
+    {
+        progress?.Report(new ShuttleOperationProgress(operation, processedFiles, totalFiles, message));
+    }
+
+    private static void ReportFileProgress(
+        IProgress<ShuttleOperationProgress>? progress,
+        ShuttleOperationKind operation,
+        int processedFiles,
+        int totalFiles,
+        string message)
+    {
+        if (totalFiles <= 50 || processedFiles == totalFiles || processedFiles % 25 == 0)
+        {
+            ReportProgress(progress, operation, processedFiles, totalFiles, message);
+        }
     }
 }

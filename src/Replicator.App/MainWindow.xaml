@@ -57,13 +57,29 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel>
-                        <TextBlock x:Name="HeaderTextBlock"
-                                   Text="Replicator"
-                                   FontSize="24"
-                                   FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal">
+                            <Image Source="{StaticResource Logo.Mark}"
+                                   Width="30"
+                                   Height="30"
+                                   Margin="0,0,12,0"
+                                   VerticalAlignment="Center" />
+                            <TextBlock x:Name="HeaderTextBlock"
+                                       Text="Replicator"
+                                       FontSize="24"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
                         <TextBlock x:Name="TaskSummaryTextBlock"
                                    Text="No profile selected."
                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                   Margin="0,4,0,0" />
+                        <TextBlock x:Name="AvailabilityTextBlock"
+                                   Text="Availability not checked."
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   Margin="0,4,0,0" />
+                        <TextBlock x:Name="DriveSecurityTextBlock"
+                                   Text="Drive security not checked."
+                                   Foreground="{StaticResource TextMutedBrush}"
                                    Margin="0,4,0,0" />
                         <ProgressBar x:Name="ActivityProgressBar"
                                      Height="6"
@@ -127,7 +143,7 @@
                         <ComboBox x:Name="ModeComboBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" SelectionChanged="ModeComboBox_SelectionChanged" />
 
                         <Label Grid.Row="4" Grid.Column="0" Content="Cadence" />
-                        <ComboBox x:Name="CadenceComboBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" />
+                        <ComboBox x:Name="CadenceComboBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" SelectionChanged="CadenceComboBox_SelectionChanged" />
 
                         <Label Grid.Row="5" Grid.Column="0" Content="Start time" />
                         <TextBox x:Name="TimeTextBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" />
@@ -135,7 +151,7 @@
                         <Label Grid.Row="6" Grid.Column="0" Content="Weekly day" />
                         <ComboBox x:Name="DayOfWeekComboBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" />
 
-                        <Label Grid.Row="7" Grid.Column="0" Content="Hourly interval" />
+                        <Label x:Name="IntervalLabel" Grid.Row="7" Grid.Column="0" Content="Hourly interval" />
                         <TextBox x:Name="IntervalHoursTextBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" />
 
                         <Label Grid.Row="8" Grid.Column="0" Content="Options" />
@@ -195,6 +211,7 @@
                         <Button x:Name="DisableTaskButton" Content="Disable Task" Click="DisableTask_Click" />
                         <Button x:Name="RemoveTaskButton" Content="Remove Task" Click="RemoveTask_Click" />
                         <Button x:Name="RefreshStatusButton" Content="Refresh Status" Click="RefreshStatus_Click" />
+                        <Button x:Name="CancelOperationButton" Content="Cancel" Click="CancelOperation_Click" Visibility="Collapsed" />
                         <Button x:Name="PrepareShuttleButton" Content="Prepare Shuttle" Click="PrepareShuttle_Click" />
                         <Button x:Name="DepartShuttleButton" Content="Depart" Click="DepartShuttle_Click" />
                         <Button x:Name="DockShuttleButton" Content="Dock Shuttle" Click="DockShuttle_Click" />
