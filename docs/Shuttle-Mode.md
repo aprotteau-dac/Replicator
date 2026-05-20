@@ -63,5 +63,5 @@ Home/travel machine:
 
 ## Field Notes
 
-- Shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, and can be canceled from the UI. The engine still needs incremental manifests, resumability, and a better result surface before it is suitable for larger folders.
+- Shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, and preserve payload timestamps so unchanged files can skip expensive SHA checks when size and timestamp still match. The engine still needs incremental manifests, resumability, and a better result surface before it is suitable for larger folders.
 - The current UI presents `Backup` and `Shuttle` as either/or profile modes. The desired product model is combined: a profile can protect on cadence and also have shuttle handoff actions.

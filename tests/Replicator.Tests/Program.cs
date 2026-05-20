@@ -13,6 +13,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("log reader summarizes latest robocopy log", LogReaderSummarizesLatestRobocopyLog),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
+    ("shuttle prepare preserves timestamps for fast skip analysis", ShuttlePreparePreservesTimestampsForFastSkipAnalysis),
     ("shuttle prepare reports file progress", ShuttlePrepareReportsFileProgress),
     ("shuttle operations honor cancellation", ShuttleOperationsHonorCancellation),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
@@ -207,6 +208,58 @@ static async Task ShuttlePrepareDepartDockReceivePreservesConflicts()
         var conflictFiles = Directory.EnumerateFiles(Path.Combine(shuttleRoot, "conflicts"), "note.md", SearchOption.AllDirectories).ToList();
         Assert(conflictFiles.Count == 1, "Expected preserved local conflict copy.");
         Assert(File.ReadAllText(conflictFiles[0]) == "local work edit", "Expected conflict copy to preserve local content.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttlePreparePreservesTimestampsForFastSkipAnalysis()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var homeSource = Path.Combine(root, "home", "repo");
+    var workSource = Path.Combine(root, "work", "repo");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+
+    Directory.CreateDirectory(homeSource);
+    Directory.CreateDirectory(workSource);
+
+    try
+    {
+        var sourceFile = Path.Combine(homeSource, "note.md");
+        var matchingWorkFile = Path.Combine(workSource, "note.md");
+        var expectedTimestamp = new DateTime(2026, 1, 2, 3, 4, 6, DateTimeKind.Utc);
+
+        File.WriteAllText(sourceFile, "same content");
+        File.WriteAllText(matchingWorkFile, "same content");
+        File.SetLastWriteTimeUtc(sourceFile, expectedTimestamp);
+        File.SetLastWriteTimeUtc(matchingWorkFile, expectedTimestamp);
+
+        var profileId = Guid.NewGuid();
+        var homeProfile = ValidShuttleProfile(profileId, homeSource, shuttleRoot);
+        var workProfile = ValidShuttleProfile(profileId, workSource, shuttleRoot);
+        var payloadFile = Path.Combine(shuttleRoot, "payload", "note.md");
+
+        var home = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+        var work = new ShuttleService(new MachineIdentity("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "WORK"));
+
+        var prepare = await home.PrepareAsync(homeProfile);
+        Assert(prepare.Succeeded, prepare.Message);
+        Assert(File.Exists(payloadFile), "Expected shuttle payload file.");
+        Assert(TimestampsWithinTolerance(File.GetLastWriteTimeUtc(payloadFile), expectedTimestamp), "Expected prepared payload to preserve source timestamp.");
+
+        var depart = await home.DepartAsync(homeProfile);
+        Assert(depart.Succeeded, depart.Message);
+
+        var dock = await work.DockAsync(workProfile);
+        Assert(dock.Succeeded, dock.Message);
+        Assert(dock.Manifest?.SkippedFiles == 1, "Expected matching inbound file to be skipped.");
+        Assert(dock.Manifest?.ChangedFiles == 0, "Expected no changed files for matching inbound payload.");
+        Assert(dock.Manifest?.ConflictFiles == 0, "Expected no conflicts for matching inbound payload.");
     }
     finally
     {
@@ -565,6 +618,11 @@ static void Assert(bool condition, string message)
     {
         throw new InvalidOperationException(message);
     }
+}
+
+static bool TimestampsWithinTolerance(DateTime first, DateTime second)
+{
+    return (first - second).Duration() <= TimeSpan.FromSeconds(2);
 }
 
 static IReadOnlyList<string> BuildScheduledTaskArguments(BackupProfile profile)

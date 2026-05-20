@@ -73,14 +73,36 @@
                                    Text="No profile selected."
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    Margin="0,4,0,0" />
-                        <TextBlock x:Name="AvailabilityTextBlock"
-                                   Text="Availability not checked."
-                                   Foreground="{StaticResource TextMutedBrush}"
-                                   Margin="0,4,0,0" />
-                        <TextBlock x:Name="DriveSecurityTextBlock"
-                                   Text="Drive security not checked."
-                                   Foreground="{StaticResource TextMutedBrush}"
-                                   Margin="0,4,0,0" />
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Image Source="{StaticResource Icon.Drive}"
+                                   Width="14"
+                                   Height="14"
+                                   VerticalAlignment="Top"
+                                   Margin="0,1,0,0" />
+                            <TextBlock x:Name="AvailabilityTextBlock"
+                                       Grid.Column="1"
+                                       Text="Availability not checked."
+                                       Foreground="{StaticResource TextMutedBrush}" />
+                        </Grid>
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Image Source="{StaticResource Icon.Locked}"
+                                   Width="14"
+                                   Height="14"
+                                   VerticalAlignment="Top"
+                                   Margin="0,1,0,0" />
+                            <TextBlock x:Name="DriveSecurityTextBlock"
+                                       Grid.Column="1"
+                                       Text="Drive security not checked."
+                                       Foreground="{StaticResource TextMutedBrush}" />
+                        </Grid>
                         <ProgressBar x:Name="ActivityProgressBar"
                                      Height="6"
                                      Width="420"
@@ -131,11 +153,35 @@
                         <Label Grid.Row="0" Grid.Column="0" Content="Name" />
                         <TextBox x:Name="NameTextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" />
 
-                        <Label Grid.Row="1" Grid.Column="0" Content="Source" />
+                        <Label Grid.Row="1" Grid.Column="0">
+                            <StackPanel Orientation="Horizontal">
+                                <Image Source="{StaticResource Icon.Source}"
+                                       Width="14"
+                                       Height="14"
+                                       Margin="0,0,7,0"
+                                       VerticalAlignment="Center" />
+                                <TextBlock Text="Source"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Label>
                         <TextBox x:Name="SourcePathTextBox" Grid.Row="1" Grid.Column="1" Margin="0,6,8,0" />
                         <Button Grid.Row="1" Grid.Column="2" Content="Browse" Click="BrowseSource_Click" Margin="0,6,0,0" />
 
-                        <Label x:Name="DestinationLabel" Grid.Row="2" Grid.Column="0" Content="Destination" />
+                        <Label x:Name="DestinationLabel" Grid.Row="2" Grid.Column="0">
+                            <StackPanel Orientation="Horizontal">
+                                <Image x:Name="DestinationLabelIcon"
+                                       Source="{StaticResource Icon.Destination}"
+                                       Width="14"
+                                       Height="14"
+                                       Margin="0,0,7,0"
+                                       VerticalAlignment="Center" />
+                                <TextBlock x:Name="DestinationLabelTextBlock"
+                                           Text="Destination"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Label>
                         <TextBox x:Name="DestinationPathTextBox" Grid.Row="2" Grid.Column="1" Margin="0,6,8,0" />
                         <Button Grid.Row="2" Grid.Column="2" Content="Browse" Click="BrowseDestination_Click" Margin="0,6,0,0" />
 

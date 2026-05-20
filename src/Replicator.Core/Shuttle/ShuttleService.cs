@@ -7,6 +7,7 @@ namespace Replicator.Core.Shuttle;
 
 public sealed class ShuttleService(MachineIdentity machineIdentity)
 {
+    private static readonly TimeSpan MetadataTimestampTolerance = TimeSpan.FromSeconds(2);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -89,8 +90,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
             if (!profile.DryRun)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(payloadPath)!);
-                File.Copy(sourceFile, payloadPath, overwrite: true);
+                CopyFile(sourceFile, payloadPath);
             }
 
             if (details.Count < 25)
@@ -468,6 +468,11 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return false;
         }
 
+        if (TimestampsMatch(first.LastWriteTimeUtc, second.LastWriteTimeUtc))
+        {
+            return true;
+        }
+
         using var firstStream = File.OpenRead(firstPath);
         using var secondStream = File.OpenRead(secondPath);
 
@@ -475,10 +480,16 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             .Equals(Convert.ToHexString(SHA256.HashData(secondStream)), StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool TimestampsMatch(DateTime first, DateTime second)
+    {
+        return (first - second).Duration() <= MetadataTimestampTolerance;
+    }
+
     private static void CopyFile(string sourcePath, string destinationPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
         File.Copy(sourcePath, destinationPath, overwrite: true);
+        File.SetLastWriteTimeUtc(destinationPath, File.GetLastWriteTimeUtc(sourcePath));
     }
 
     private async Task WriteManifestAsync(ShuttlePaths paths, ShuttleManifest manifest, CancellationToken cancellationToken)

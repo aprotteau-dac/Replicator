@@ -162,7 +162,7 @@ public partial class MainWindow : Window
         }
 
         profile.Mode = mode;
-        DestinationLabel.Content = mode == ProfileMode.Shuttle ? "Shuttle path" : "Destination";
+        SetDestinationLabel(mode);
         ShowAvailability(_availabilityChecker.Check(profile));
         UpdateActionSurface(profile, _currentTaskSnapshot);
     }
@@ -389,6 +389,7 @@ public partial class MainWindow : Window
             ? $"Last result: {snapshot.LastResult}"
             : $"{snapshot.LastRunTime}; result {snapshot.LastResult}";
         TaskSummaryTextBlock.Text = $"{snapshot.State} | {profile.Engine} | {profile.Target.Kind}";
+        ApplyTaskStatusBrushes(snapshot);
         UpdateActionSurface(profile, snapshot);
     }
 
@@ -441,6 +442,7 @@ public partial class MainWindow : Window
             var snapshot = await _scheduledTasks.QueryAsync(profile);
             _currentTaskSnapshot = snapshot;
             TaskSummaryTextBlock.Text = $"{snapshot.State} | {profile.Engine} | {profile.Target.Kind}";
+            ApplyTaskStatusBrushes(snapshot);
             UpdateActionSurface(profile, snapshot);
 
             if (snapshot.State != ScheduledTaskState.Running)
@@ -478,6 +480,7 @@ public partial class MainWindow : Window
             {
                 HeaderTextBlock.Text = "Replicator";
                 TaskSummaryTextBlock.Text = "No profile selected.";
+                TaskSummaryTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
                 AvailabilityTextBlock.Text = "Availability not checked.";
                 DriveSecurityTextBlock.Text = "Drive security not checked.";
                 _currentTaskSnapshot = null;
@@ -490,7 +493,7 @@ public partial class MainWindow : Window
             NameTextBox.Text = profile.Name;
             SourcePathTextBox.Text = profile.SourcePath;
             ModeComboBox.SelectedItem = profile.Mode;
-            DestinationLabel.Content = profile.Mode == ProfileMode.Shuttle ? "Shuttle path" : "Destination";
+            SetDestinationLabel(profile.Mode);
             DestinationPathTextBox.Text = profile.Target.Path;
             CadenceComboBox.SelectedItem = profile.Schedule.Cadence;
             TimeTextBox.Text = profile.Schedule.TimeOfDay.ToString("HH:mm", CultureInfo.InvariantCulture);
@@ -506,6 +509,7 @@ public partial class MainWindow : Window
             TaskNameTextBlock.Text = ScheduledTaskName.ForProfile(profile);
             NextRunTextBlock.Text = "";
             LastRunTextBlock.Text = "";
+            ResetTaskStatusBrushes();
             ShowLatestRun(profile);
             ShowAvailability(_availabilityChecker.Check(profile));
             DriveSecurityTextBlock.Text = "Drive security not checked.";
@@ -638,6 +642,13 @@ public partial class MainWindow : Window
         };
     }
 
+    private void SetDestinationLabel(ProfileMode mode)
+    {
+        DestinationLabelTextBlock.Text = mode == ProfileMode.Shuttle ? "Shuttle path" : "Destination";
+        DestinationLabelIcon.Source = (System.Windows.Media.ImageSource)FindResource(
+            mode == ProfileMode.Shuttle ? "Icon.Shuttle" : "Icon.Destination");
+    }
+
     private static void BrowseForFolder(System.Windows.Controls.TextBox target)
     {
         using var dialog = new WinForms.FolderBrowserDialog
@@ -666,7 +677,7 @@ public partial class MainWindow : Window
         AvailabilityTextBlock.Foreground = report.HasErrors
             ? (System.Windows.Media.Brush)FindResource("StatusErrorBrush")
             : report.HasWarnings
-                ? (System.Windows.Media.Brush)FindResource("WarningBrush")
+                ? (System.Windows.Media.Brush)FindResource("Brush.Status.Alarm")
                 : (System.Windows.Media.Brush)FindResource("TextMutedBrush");
     }
 
@@ -694,7 +705,7 @@ public partial class MainWindow : Window
             }
 
             DriveSecurityTextBlock.Text = $"Drive security: check failed. {exception.Message}";
-            DriveSecurityTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("WarningBrush");
+            DriveSecurityTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("Brush.Status.Alarm");
         }
     }
 
@@ -704,8 +715,27 @@ public partial class MainWindow : Window
         DriveSecurityTextBlock.Foreground = report.HasErrors
             ? (System.Windows.Media.Brush)FindResource("StatusErrorBrush")
             : report.HasWarnings
-                ? (System.Windows.Media.Brush)FindResource("WarningBrush")
+                ? (System.Windows.Media.Brush)FindResource("Brush.Status.Alarm")
                 : (System.Windows.Media.Brush)FindResource("TextMutedBrush");
+    }
+
+    private void ApplyTaskStatusBrushes(ScheduledTaskSnapshot snapshot)
+    {
+        var secondaryBrush = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
+        var alarmBrush = (System.Windows.Media.Brush)FindResource("Brush.Status.Alarm");
+        var stateBrush = snapshot.State == ScheduledTaskState.Missing ? alarmBrush : secondaryBrush;
+
+        NextRunTextBlock.Foreground = stateBrush;
+        TaskSummaryTextBlock.Foreground = stateBrush;
+        LastRunTextBlock.Foreground = snapshot.LastResult == 0 ? secondaryBrush : alarmBrush;
+    }
+
+    private void ResetTaskStatusBrushes()
+    {
+        var secondaryBrush = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
+        NextRunTextBlock.Foreground = secondaryBrush;
+        LastRunTextBlock.Foreground = secondaryBrush;
+        TaskSummaryTextBlock.Foreground = secondaryBrush;
     }
 
     private void ShowShuttleProgress(ShuttleOperationProgress progress)
