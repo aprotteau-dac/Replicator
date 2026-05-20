@@ -18,6 +18,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("shuttle prepare preserves timestamps for fast skip analysis", ShuttlePreparePreservesTimestampsForFastSkipAnalysis),
     ("shuttle dock compares drifted local files against manifest hash", ShuttleDockComparesDriftedLocalFilesAgainstManifestHash),
     ("shuttle prepare reports file progress", ShuttlePrepareReportsFileProgress),
+    ("shuttle prepare reports progress for skipped files", ShuttlePrepareReportsProgressForSkippedFiles),
     ("shuttle operations honor cancellation", ShuttleOperationsHonorCancellation),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
@@ -373,9 +374,17 @@ static async Task ShuttleLongManifestSmokeHandles6500SkippedFiles()
         var home = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
         var work = new ShuttleService(new MachineIdentity("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "WORK"));
 
+        var firstPrepareStopwatch = Stopwatch.StartNew();
         var prepare = await home.PrepareAsync(homeProfile);
+        firstPrepareStopwatch.Stop();
         Assert(prepare.Succeeded, prepare.Message);
         Assert(prepare.Manifest?.Entries.Count == fileCount, $"Expected {fileCount} manifest entries.");
+
+        var secondPrepareStopwatch = Stopwatch.StartNew();
+        var secondPrepare = await home.PrepareAsync(homeProfile);
+        secondPrepareStopwatch.Stop();
+        Assert(secondPrepare.Succeeded, secondPrepare.Message);
+        Assert(secondPrepare.Manifest?.SkippedFiles == fileCount, $"Expected {fileCount} skipped files on second prepare.");
 
         var depart = await home.DepartAsync(homeProfile);
         Assert(depart.Succeeded, depart.Message);
@@ -388,6 +397,8 @@ static async Task ShuttleLongManifestSmokeHandles6500SkippedFiles()
         Assert(dock.Manifest?.SkippedFiles == fileCount, $"Expected {fileCount} skipped files.");
         Assert(dock.Manifest?.ChangedFiles == 0, "Expected no changed files.");
         Assert(dock.Manifest?.ConflictFiles == 0, "Expected no conflicts.");
+        Console.WriteLine($"INFO long shuttle first prepare staged {fileCount} files in {firstPrepareStopwatch.Elapsed.TotalSeconds:0.00}s.");
+        Console.WriteLine($"INFO long shuttle second prepare skipped {fileCount} files in {secondPrepareStopwatch.Elapsed.TotalSeconds:0.00}s.");
         Console.WriteLine($"INFO long shuttle dock analyzed {fileCount} skipped files in {stopwatch.Elapsed.TotalSeconds:0.00}s.");
     }
     finally
@@ -433,6 +444,47 @@ static async Task ShuttlePrepareReportsFileProgress()
 
         Assert(maxProcessed == 2, $"Expected max processed file count to be 2, got {maxProcessed}.");
         Assert(progressEvents.Any(item => item.Operation == ShuttleOperationKind.Prepare && item.PercentComplete == 100), "Expected a 100% progress event.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttlePrepareReportsProgressForSkippedFiles()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+
+    Directory.CreateDirectory(source);
+
+    try
+    {
+        File.WriteAllText(Path.Combine(source, "one.md"), "one");
+        File.WriteAllText(Path.Combine(source, "two.md"), "two");
+
+        var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+        var service = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+        var firstPrepare = await service.PrepareAsync(profile);
+        Assert(firstPrepare.Succeeded, firstPrepare.Message);
+
+        var progressEvents = new System.Collections.Concurrent.ConcurrentQueue<ShuttleOperationProgress>();
+        var progress = new Progress<ShuttleOperationProgress>(progressEvents.Enqueue);
+
+        var secondPrepare = await service.PrepareAsync(profile, progress);
+        for (var attempt = 0; attempt < 20 && !progressEvents.Any(item => item.Operation == ShuttleOperationKind.Prepare && item.TotalFiles == 2 && item.ProcessedFiles == 2); attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert(secondPrepare.Succeeded, secondPrepare.Message);
+        Assert(secondPrepare.Manifest?.SkippedFiles == 2, "Expected second prepare to skip unchanged files.");
+        Assert(progressEvents.Any(item => item.Operation == ShuttleOperationKind.Prepare && item.TotalFiles == 2 && item.ProcessedFiles == 1), "Expected prepare progress after the first skipped file.");
+        Assert(progressEvents.Any(item => item.Operation == ShuttleOperationKind.Prepare && item.TotalFiles == 2 && item.ProcessedFiles == 2), "Expected prepare progress to complete skipped files.");
     }
     finally
     {

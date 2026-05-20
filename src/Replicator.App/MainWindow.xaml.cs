@@ -755,8 +755,15 @@ public partial class MainWindow : Window
         ShowStatus(
             progress.TotalFiles <= 0
                 ? progress.Message
-                : $"{progress.Message} {progress.PercentComplete:0}%",
+                : $"{progress.Message} {FormatPercent(progress.PercentComplete)}",
             true);
+    }
+
+    private static string FormatPercent(double percent)
+    {
+        return percent > 0 && percent < 1
+            ? "<1%"
+            : $"{percent:0}%";
     }
 
     private async Task RunBusyAsync(string busyMessage, Func<Task> operation)

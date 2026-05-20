@@ -72,16 +72,36 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             manifest.TotalFiles++;
             var relativePath = NormalizeRelativePath(Path.GetRelativePath(profile.SourcePath, sourceFile));
             previousEntries.TryGetValue(relativePath, out var previousEntry);
-            var sourceEntry = CreateFileEntry(relativePath, sourceFile, previousEntry);
-            manifest.Entries.Add(sourceEntry);
+            var sourceInfo = new FileInfo(sourceFile);
+            var sourceEntry = TryReuseEntry(relativePath, sourceInfo, previousEntry);
 
             var payloadPath = CombineUnderRoot(paths.PayloadDirectory, relativePath);
             var payloadExists = File.Exists(payloadPath);
-            var shouldCopy = !payloadExists || !FileMatchesEntry(sourceEntry, payloadPath);
+            var shouldCopy = !payloadExists;
+
+            ReportFileProgress(
+                progress,
+                ShuttleOperationKind.Prepare,
+                processedFiles,
+                sourceFiles.Count,
+                $"Indexing {processedFiles} of {sourceFiles.Count} files.");
+
+            if (payloadExists)
+            {
+                sourceEntry ??= CreateFileEntry(relativePath, sourceFile, previousEntry: null);
+                shouldCopy = !FileMatchesEntry(sourceEntry, payloadPath);
+            }
 
             if (!shouldCopy)
             {
+                manifest.Entries.Add(sourceEntry!);
                 manifest.SkippedFiles++;
+                ReportFileProgress(
+                    progress,
+                    ShuttleOperationKind.Prepare,
+                    processedFiles,
+                    sourceFiles.Count,
+                    $"Checked {processedFiles} of {sourceFiles.Count} files.");
                 continue;
             }
 
@@ -97,8 +117,16 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
             if (!profile.DryRun)
             {
-                CopyFile(sourceFile, payloadPath);
+                sourceEntry = sourceEntry is null
+                    ? CopyFileAndCreateEntry(relativePath, sourceFile, payloadPath)
+                    : CopyFile(sourceEntry, sourceFile, payloadPath);
             }
+            else
+            {
+                sourceEntry ??= CreateFileEntry(relativePath, sourceFile, previousEntry: null);
+            }
+
+            manifest.Entries.Add(sourceEntry);
 
             if (details.Count < 25)
             {
@@ -563,6 +591,27 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         };
     }
 
+    private static ShuttleManifestEntry? TryReuseEntry(
+        string relativePath,
+        FileInfo file,
+        ShuttleManifestEntry? previousEntry)
+    {
+        if (previousEntry is null ||
+            string.IsNullOrWhiteSpace(previousEntry.Sha256) ||
+            !EntryMetadataMatchesFile(previousEntry, file))
+        {
+            return null;
+        }
+
+        return new ShuttleManifestEntry
+        {
+            RelativePath = NormalizeRelativePath(relativePath),
+            Length = file.Length,
+            LastWriteTimeUtc = file.LastWriteTimeUtc,
+            Sha256 = previousEntry.Sha256
+        };
+    }
+
     private static bool EntryMetadataMatchesFile(ShuttleManifestEntry entry, FileInfo file)
     {
         return file.Exists &&
@@ -627,11 +676,57 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         return candidate;
     }
 
+    private static ShuttleManifestEntry CopyFile(
+        ShuttleManifestEntry entry,
+        string sourcePath,
+        string destinationPath)
+    {
+        CopyFile(sourcePath, destinationPath);
+        return entry;
+    }
+
     private static void CopyFile(string sourcePath, string destinationPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
         File.Copy(sourcePath, destinationPath, overwrite: true);
         File.SetLastWriteTimeUtc(destinationPath, File.GetLastWriteTimeUtc(sourcePath));
+    }
+
+    private static ShuttleManifestEntry CopyFileAndCreateEntry(
+        string relativePath,
+        string sourcePath,
+        string destinationPath)
+    {
+        var sourceInfo = new FileInfo(sourcePath);
+        if (!sourceInfo.Exists)
+        {
+            throw new FileNotFoundException("Cannot stage a missing shuttle source file.", sourcePath);
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using (var source = File.OpenRead(sourcePath))
+        using (var destination = File.Create(destinationPath))
+        {
+            var buffer = new byte[1024 * 128];
+            int read;
+            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                destination.Write(buffer.AsSpan(0, read));
+                hash.AppendData(buffer, 0, read);
+            }
+        }
+
+        File.SetLastWriteTimeUtc(destinationPath, sourceInfo.LastWriteTimeUtc);
+
+        return new ShuttleManifestEntry
+        {
+            RelativePath = NormalizeRelativePath(relativePath),
+            Length = sourceInfo.Length,
+            LastWriteTimeUtc = sourceInfo.LastWriteTimeUtc,
+            Sha256 = Convert.ToHexString(hash.GetHashAndReset())
+        };
     }
 
     private async Task WriteManifestAsync(ShuttlePaths paths, ShuttleManifest manifest, CancellationToken cancellationToken)
@@ -819,7 +914,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         int totalFiles,
         string message)
     {
-        if (totalFiles <= 50 || processedFiles == totalFiles || processedFiles % 25 == 0)
+        if (totalFiles <= 50 || processedFiles == 1 || processedFiles == totalFiles || processedFiles % 25 == 0)
         {
             ReportProgress(progress, operation, processedFiles, totalFiles, message);
         }

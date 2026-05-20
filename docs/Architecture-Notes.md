@@ -29,6 +29,7 @@ Initial mitigations now implemented:
 - user-initiated cancellation is wired through shuttle operations
 - hashing uses streams instead of whole-file reads
 - payload copies preserve source last-write timestamps
+- first-time payload staging hashes while copying new files so source files are not read once for SHA and again for copy
 - unchanged comparisons first check file size and timestamp before falling back to SHA-256 hashing
 - prepare manifests include per-file entries with relative path, size, last-write timestamp, and SHA-256
 - dock and receive use manifest entries first, so drifted-timestamp matches can be verified from the local file hash without re-reading the shuttle payload

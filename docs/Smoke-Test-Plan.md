@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-17 test(s) passed.
+18 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -43,7 +43,7 @@ dotnet run --project tests\Replicator.Tests\Replicator.Tests.csproj
 Remove-Item Env:\REPLICATOR_LONG_SHUTTLE_SMOKE
 ```
 
-Expected result: the extra long smoke creates 6,500 matching files with drifted local timestamps, docks them as skips through manifest-hash comparison, and prints the elapsed dock-analysis time.
+Expected result: the extra long smoke creates 6,500 matching files with drifted local timestamps, verifies manifest-hash skip analysis, and prints elapsed times for first prepare, second skipped prepare, and dock analysis.
 
 ## Manual Windows Smoke
 

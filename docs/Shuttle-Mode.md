@@ -63,5 +63,6 @@ Home/travel machine:
 
 ## Field Notes
 
-- Shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, and preserve payload timestamps so unchanged files can skip expensive SHA checks when size and timestamp still match. The engine still needs incremental manifests, resumability, and a better result surface before it is suitable for larger folders.
+- Shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, preserve payload timestamps, and write per-file manifest entries with SHA-256 hashes. First-time staging hashes while copying so new source files are not read twice. Later prepares can reuse unchanged manifest hashes, and dock/receive can classify drifted-timestamp files from the manifest hash without re-reading the shuttle payload file.
+- Current long-smoke timing on a generated 6,500-file tree: first prepare about 20s, skipped prepare under 1s, dock analysis about 2s. Real timings will vary with file sizes and external-drive speed.
 - The current UI presents `Backup` and `Shuttle` as either/or profile modes. The desired product model is combined: a profile can protect on cadence and also have shuttle handoff actions.

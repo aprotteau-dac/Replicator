@@ -217,7 +217,7 @@ Home/travel machine:
 
 Current shuttle actions are manual. Scheduled `Protect` for shuttle pairs should be implemented as a dedicated shuttle task runner rather than reusing the backup robocopy script, because shuttle protect needs manifests and pending-inbound guards.
 
-Field note: shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, preserve payload timestamps, and write per-file manifest entries with SHA-256 hashes. Dock and receive can classify drifted-timestamp files from the manifest hash without re-reading the payload file. The engine still needs resumability and a better result surface before it is suitable for larger folders.
+Field note: shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, preserve payload timestamps, and write per-file manifest entries with SHA-256 hashes. First-time staging hashes while copying so new source files are not read twice. Later prepares can reuse unchanged manifest hashes, and dock/receive can classify drifted-timestamp files from the manifest hash without re-reading the shuttle payload file. Current long-smoke timing on a generated 6,500-file tree: first prepare about 20s, skipped prepare under 1s, dock analysis about 2s.
 
 ## Known Limitations
 
@@ -253,7 +253,7 @@ Near-term backlog items:
 - **Drive identity over drive letters**: bind profiles to volume identity/label/serial metadata so `E:` becoming `F:` does not break profiles.
 - **Shuttle protect cadence**: add a dedicated scheduled shuttle-protect runner that writes manifests and respects pending inbound state, rather than reusing the backup robocopy runner.
 - **Shuttle as profile capability**: redesign profiles so a profile can run scheduled protect/backup behavior and also expose shuttle actions. The current `Backup` versus `Shuttle` split is a prototype simplification.
-- **Large shuttle performance**: first slices implemented. Shuttle file work now runs off the WPF UI thread with throttled file-count progress, stream hashing, timestamp-preserving payload copies, manifest file indexes, metadata fast-skip checks, manifest-hash fallback checks, and user-initiated cancellation. Remaining work: resumability and avoiding long operation output in a single text box.
+- **Large shuttle performance**: first slices implemented. Shuttle file work now runs off the WPF UI thread with throttled file-count progress, stream hashing, hash-while-copy staging, timestamp-preserving payload copies, manifest file indexes, metadata fast-skip checks, manifest-hash fallback checks, and user-initiated cancellation. Remaining work: resumability and avoiding long operation output in a single text box.
 - **Job history and audit UI**: replace the results textbox with a tabular jobs view backed by SQLite or another lightweight local database. Every backup/shuttle/restore run should create an auditable job record with stats, logs, artifacts, and drill-down detail.
 - **Path drift compensation**: match shuttle pairs even when the local repo/folder moved or has a different intermediate path, using explicit pair ids, Git history/ref fingerprints, and content similarity.
 - **Git shuttle engine**: support external-drive bare Git remotes for sensitive repos so committed work can move through Git’s conflict model without network remotes.
