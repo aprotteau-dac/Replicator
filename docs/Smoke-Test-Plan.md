@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-26 test(s) passed.
+27 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -34,6 +34,7 @@ This gate covers:
 - hidden non-interactive scheduled task PowerShell action
 - minute schedule command generation and validation
 - default development excludes
+- shuttle source enumeration prunes excluded directories before recursion
 - availability checks for missing source, creatable target, and unavailable drive
 - BitLocker parser classification
 - BitLocker permission-required classification and provider mapping

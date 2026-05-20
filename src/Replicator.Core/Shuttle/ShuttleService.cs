@@ -8,6 +8,7 @@ namespace Replicator.Core.Shuttle;
 public sealed class ShuttleService(MachineIdentity machineIdentity)
 {
     private static readonly TimeSpan MetadataTimestampTolerance = TimeSpan.FromSeconds(2);
+    private static readonly ShuttleSourceFileEnumerator SourceFileEnumerator = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -515,13 +516,9 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
     private IEnumerable<string> EnumerateSourceFiles(BackupProfile profile, CancellationToken cancellationToken)
     {
         var sourceRoot = ExpandPath(profile.SourcePath);
-        foreach (var path in EnumerateFiles(sourceRoot, cancellationToken))
+        foreach (var path in SourceFileEnumerator.EnumerateFiles(sourceRoot, profile.ExcludePatterns, cancellationToken))
         {
-            var relativePath = Path.GetRelativePath(sourceRoot, path);
-            if (!IsExcluded(relativePath, profile.ExcludePatterns))
-            {
-                yield return path;
-            }
+            yield return path;
         }
     }
 
@@ -537,29 +534,6 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             cancellationToken.ThrowIfCancellationRequested();
             yield return path;
         }
-    }
-
-    private static bool IsExcluded(string relativePath, IEnumerable<string> excludePatterns)
-    {
-        var segments = relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        var fileName = Path.GetFileName(relativePath);
-
-        foreach (var rawPattern in excludePatterns.Append(".replicator-conflicts"))
-        {
-            var pattern = rawPattern.Trim();
-            if (string.IsNullOrWhiteSpace(pattern))
-            {
-                continue;
-            }
-
-            if (fileName.Equals(pattern, StringComparison.OrdinalIgnoreCase) ||
-                segments.Any(segment => segment.Equals(pattern, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static IReadOnlyList<ShuttleManifestEntry> GetPayloadEntries(

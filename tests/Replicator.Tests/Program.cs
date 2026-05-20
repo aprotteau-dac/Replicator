@@ -16,6 +16,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("log reader summarizes latest robocopy log", LogReaderSummarizesLatestRobocopyLog),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
+    ("shuttle source enumeration prunes excluded directories", ShuttleSourceEnumerationPrunesExcludedDirectories),
     ("shuttle prepare preserves timestamps for fast skip analysis", ShuttlePreparePreservesTimestampsForFastSkipAnalysis),
     ("shuttle dock compares drifted local files against manifest hash", ShuttleDockComparesDriftedLocalFilesAgainstManifestHash),
     ("shuttle prepare reports file progress", ShuttlePrepareReportsFileProgress),
@@ -234,6 +235,57 @@ static async Task ShuttlePrepareDepartDockReceivePreservesConflicts()
             Directory.Delete(root, recursive: true);
         }
     }
+}
+
+static Task ShuttleSourceEnumerationPrunesExcludedDirectories()
+{
+    var root = Path.GetFullPath(Path.Combine("source-root"));
+    var src = Path.Combine(root, "src");
+    var excluded = Path.Combine(root, "node_modules");
+    var visited = new List<string>();
+
+    var enumerator = new ShuttleSourceFileEnumerator(
+        path =>
+        {
+            visited.Add($"files:{path}");
+            if (path == excluded)
+            {
+                throw new InvalidOperationException("Excluded directory should not be scanned for files.");
+            }
+
+            if (path == root)
+            {
+                return [Path.Combine(root, "README.md")];
+            }
+
+            if (path == src)
+            {
+                return [Path.Combine(src, "app.cs")];
+            }
+
+            return [];
+        },
+        path =>
+        {
+            visited.Add($"dirs:{path}");
+            if (path == excluded)
+            {
+                throw new InvalidOperationException("Excluded directory should not be scanned for child directories.");
+            }
+
+            return path == root
+                ? [src, excluded]
+                : [];
+        });
+
+    var files = enumerator.EnumerateFiles(root, ["node_modules"], CancellationToken.None).ToList();
+
+    Assert(files.Count == 2, $"Expected only included files, got {files.Count}.");
+    Assert(files.Any(path => path.EndsWith("README.md", StringComparison.OrdinalIgnoreCase)), "Expected root file.");
+    Assert(files.Any(path => path.EndsWith("app.cs", StringComparison.OrdinalIgnoreCase)), "Expected src file.");
+    Assert(!visited.Contains($"files:{excluded}"), "Excluded directory should not be enumerated for files.");
+    Assert(!visited.Contains($"dirs:{excluded}"), "Excluded directory should not be enumerated for directories.");
+    return Task.CompletedTask;
 }
 
 static async Task ShuttlePreparePreservesTimestampsForFastSkipAnalysis()

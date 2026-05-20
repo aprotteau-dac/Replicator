@@ -223,7 +223,7 @@ Home/travel machine:
 
 Current shuttle actions are manual. Scheduled `Protect` for shuttle pairs should be implemented as a dedicated shuttle task runner rather than reusing the backup robocopy script, because shuttle protect needs manifests and pending-inbound guards.
 
-Field note: shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, preserve payload timestamps, and write per-file manifest entries with SHA-256 hashes. First-time staging hashes while copying so new source files are not read twice. Later prepares can reuse unchanged manifest hashes, and dock/receive can classify drifted-timestamp files from the manifest hash without re-reading the shuttle payload file. Current long-smoke timing on a generated 6,500-file tree: first prepare about 20s, skipped prepare under 1s, dock analysis about 2s.
+Field note: shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, preserve payload timestamps, prune excluded directories before recursion, and write per-file manifest entries with SHA-256 hashes. First-time staging hashes while copying so new source files are not read twice. Later prepares can reuse unchanged manifest hashes, and dock/receive can classify drifted-timestamp files from the manifest hash without re-reading the shuttle payload file. Current long-smoke timing on a generated 6,500-file tree: first prepare about 8-10s, skipped prepare under 1s, dock analysis about 2s.
 
 ## Known Limitations
 
