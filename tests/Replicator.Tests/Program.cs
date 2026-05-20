@@ -32,7 +32,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("availability checker reports missing source and creatable target", AvailabilityCheckerReportsMissingSourceAndCreatableTarget),
     ("availability checker reports unavailable drive", AvailabilityCheckerReportsUnavailableDrive),
     ("bitlocker parser classifies protected unprotected and locked drives", BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives),
-    ("bitlocker access denied reason is actionable", BitLockerAccessDeniedReasonIsActionable),
+    ("bitlocker access denied is classified as permission required", BitLockerAccessDeniedIsClassifiedAsPermissionRequired),
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
 
@@ -841,22 +841,20 @@ static Task BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives()
     return Task.CompletedTask;
 }
 
-static Task BitLockerAccessDeniedReasonIsActionable()
+static Task BitLockerAccessDeniedIsClassifiedAsPermissionRequired()
 {
-    var formatter = typeof(PowerShellBitLockerStatusProvider).GetMethod(
-        "FormatUnknownReason",
-        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+    var item = BitLockerQueryFailureClassifier.ToSecurityItem(
+        "Source drive",
+        @"D:\repos\personal",
+        @"D:\",
+        "Get-CimInstance : Access denied");
 
-    if (formatter is null)
-    {
-        throw new InvalidOperationException("Expected BitLocker unknown reason formatter.");
-    }
-
-    var formatted = (string)formatter.Invoke(null, [@"D:\", "Get-CimInstance : Access denied"])!;
-
-    Assert(formatted.Contains(@"D:\", StringComparison.OrdinalIgnoreCase), $"Expected drive root in formatted reason: {formatted}");
-    Assert(formatted.Contains("elevated permissions", StringComparison.OrdinalIgnoreCase), $"Expected actionable elevation guidance: {formatted}");
-    Assert(!formatted.Contains("Get-CimInstance", StringComparison.OrdinalIgnoreCase), $"Expected raw PowerShell command text to be hidden: {formatted}");
+    Assert(item.State == DriveSecurityState.PermissionRequired, $"Expected permission-required state, got {item.State}.");
+    Assert(item.Severity == DriveSecuritySeverity.Warning, "Permission-required posture should warn without blocking.");
+    Assert(item.Message.Contains(@"D:\", StringComparison.OrdinalIgnoreCase), $"Expected drive root in message: {item.Message}");
+    Assert(item.Message.Contains("elevated permissions", StringComparison.OrdinalIgnoreCase), $"Expected elevation guidance: {item.Message}");
+    Assert(!item.Message.Contains("Get-CimInstance", StringComparison.OrdinalIgnoreCase), $"Expected raw PowerShell command text to be hidden: {item.Message}");
+    Assert(!item.Message.Contains("Access denied", StringComparison.OrdinalIgnoreCase), $"Expected raw access-denied text to be hidden: {item.Message}");
     return Task.CompletedTask;
 }
 

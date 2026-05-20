@@ -7,5 +7,6 @@ public enum DriveSecurityState
     Unprotected = 2,
     Locked = 3,
     Unavailable = 4,
-    NotApplicable = 5
+    NotApplicable = 5,
+    PermissionRequired = 6
 }
