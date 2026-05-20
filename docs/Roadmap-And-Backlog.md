@@ -16,7 +16,7 @@
 ## Near-Term Backlog
 
 - **Graceful unavailable states**: backup-profile preflight, scheduled-script failures, and shuttle operation availability blocks are implemented. Next expansion is secure-drive policy detail and BitLocker enforcement.
-- **BitLocker posture checks**: first visibility slice implemented. Replicator now checks local Windows profile drive roots and reports protected, unprotected, locked, unavailable, or unknown posture. Remaining work: policy enforcement, unlock guidance, and BitLocker To Go setup flow.
+- **BitLocker posture checks**: first visibility slice implemented. Replicator now checks local Windows profile drive roots and reports protected, unprotected, locked, unavailable, permission-required, or unknown posture. Remaining work: policy enforcement, unlock guidance, and BitLocker To Go setup flow.
 - **Known shuttle drive detection**: add a tray app or Windows Service that watches for volume arrival, recognizes member drives, and prompts `Dock Shuttle` when relevant.
 - **Drive identity over drive letters**: bind profiles to volume identity/label/serial metadata so `E:` becoming `F:` does not break profiles.
 - **Shuttle protect cadence**: add a dedicated scheduled shuttle-protect runner that writes manifests and respects pending inbound state, rather than reusing the backup robocopy runner.

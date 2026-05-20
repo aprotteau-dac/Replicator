@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-24 test(s) passed.
+26 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -36,7 +36,7 @@ This gate covers:
 - default development excludes
 - availability checks for missing source, creatable target, and unavailable drive
 - BitLocker parser classification
-- BitLocker access-denied message formatting
+- BitLocker permission-required classification and provider mapping
 - profile drive-security summary behavior
 
 Optional long shuttle smoke:
@@ -199,7 +199,7 @@ Use the same profile with a local drive target or an external BitLocker To Go dr
 Pass criteria:
 
 - drive-security check never blocks the UI permanently
-- protected, unprotected, locked, unavailable, or unknown states are visible
+- protected, unprotected, locked, unavailable, permission-required, or unknown states are visible
 - Replicator warns only; it does not enforce blocking policy yet
 
 ## Stop Criteria
@@ -210,7 +210,7 @@ Stop the smoke pass and open a [GitHub bug](Bug-Tracking.md) if any of these occ
 - backup or shuttle writes to an unexpected path
 - scheduled task action buttons contradict the task state
 - unavailable source or target starts a copy anyway
-- BitLocker command failure crashes the app instead of reporting unknown posture
+- BitLocker command failure crashes the app instead of reporting unavailable, permission-required, or unknown posture
 - conflict receive overwrites local content without preserving a conflict copy
 
 ## Evidence To Capture
