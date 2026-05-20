@@ -108,7 +108,7 @@ public sealed class WindowsScheduledTaskService(ProcessRunner processRunner) : I
             "/TN",
             taskName,
             "/TR",
-            $"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"",
+            $"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{scriptPath}\"",
             "/F"
         };
 

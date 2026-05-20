@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-22 test(s) passed.
+24 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -31,10 +31,12 @@ This gate covers:
 - shuttle operation blocking for unavailable source or shuttle paths
 - shuttle environment-variable source path expansion
 - scheduled task naming
+- hidden non-interactive scheduled task PowerShell action
 - minute schedule command generation and validation
 - default development excludes
 - availability checks for missing source, creatable target, and unavailable drive
 - BitLocker parser classification
+- BitLocker access-denied message formatting
 - profile drive-security summary behavior
 
 Optional long shuttle smoke:

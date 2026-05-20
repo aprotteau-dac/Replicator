@@ -74,7 +74,7 @@ public sealed class PowerShellBitLockerStatusProvider(ProcessRunner processRunne
             root,
             DriveSecurityState.Unknown,
             DriveSecuritySeverity.Warning,
-            $"Drive security: {label} BitLocker status unknown ({root}). {reason}");
+            $"Drive security: {label} BitLocker status unknown ({root}). {FormatUnknownReason(root, reason)}");
     }
 
     private static DriveSecurityItem Unavailable(string label, string path, string root, string reason)
@@ -88,11 +88,24 @@ public sealed class PowerShellBitLockerStatusProvider(ProcessRunner processRunne
             $"Drive security: {label} is unavailable ({root}). {reason}");
     }
 
+    private static string FormatUnknownReason(string root, string reason)
+    {
+        return IsAccessDeniedMessage(reason)
+            ? $"Cannot check BitLocker status for {root} without elevated permissions."
+            : reason;
+    }
+
     private static bool IsUnavailableMessage(string message)
     {
         return message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("cannot find", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("does not exist", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAccessDeniedMessage(string message)
+    {
+        return message.Contains("access denied", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? FirstNonEmptyLine(string text)

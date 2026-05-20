@@ -21,6 +21,8 @@ The header can show:
 - BitLocker locked
 - unavailable or unknown
 
+If Windows denies the BitLocker status query, Replicator reports that the status cannot be checked without elevated permissions instead of showing raw PowerShell/CIM error text.
+
 This is not yet an enforcement control. Replicator warns about unprotected or unknown drives, but it does not block backup or shuttle writes yet.
 
 ## Planned BitLocker Enforcement

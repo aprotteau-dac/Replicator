@@ -23,7 +23,7 @@ Robocopy exit codes `0` through `7` are treated as successful.
 
 The app preflights source and destination availability before manual `Run Now` and `Preview Dry Run` operations. If the source drive, source path, or destination drive is unavailable, the run is stopped before launching PowerShell and the status banner names the unavailable path.
 
-Scheduled task scripts also check the source and target roots before copying. If an external drive is unplugged or a source path is missing, the task fails cleanly, writes the error to the run log/status file, and retries naturally on the next scheduled cadence.
+Scheduled task scripts run through hidden, non-interactive PowerShell actions. They also check the source and target roots before copying. If an external drive is unplugged or a source path is missing, the task fails cleanly, writes the error to the run log/status file, and retries naturally on the next scheduled cadence.
 
 Supported task cadences are manual, minutes, hourly, daily, and weekly. Minute schedules use Windows Task Scheduler's minute cadence with the configured minute interval.
 

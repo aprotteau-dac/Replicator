@@ -25,12 +25,14 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("shuttle prepare expands environment variable source path", ShuttlePrepareExpandsEnvironmentVariableSourcePath),
     ("shuttle metadata operations block missing source", ShuttleMetadataOperationsBlockMissingSource),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
+    ("scheduled task action runs hidden noninteractive powershell", ScheduledTaskActionRunsHiddenNonInteractivePowerShell),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
     ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes),
     ("validator rejects invalid minute interval", ValidatorRejectsInvalidMinuteInterval),
     ("availability checker reports missing source and creatable target", AvailabilityCheckerReportsMissingSourceAndCreatableTarget),
     ("availability checker reports unavailable drive", AvailabilityCheckerReportsUnavailableDrive),
     ("bitlocker parser classifies protected unprotected and locked drives", BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives),
+    ("bitlocker access denied reason is actionable", BitLockerAccessDeniedReasonIsActionable),
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
 
@@ -700,6 +702,22 @@ static Task ScheduledTaskNamesAreScoped()
     return Task.CompletedTask;
 }
 
+static Task ScheduledTaskActionRunsHiddenNonInteractivePowerShell()
+{
+    var profile = ValidProfile();
+    var arguments = BuildScheduledTaskArguments(profile);
+    var taskRunIndex = arguments.ToList().IndexOf("/TR");
+    Assert(taskRunIndex >= 0 && taskRunIndex + 1 < arguments.Count, "Expected scheduled task run command.");
+
+    var taskRunCommand = arguments[taskRunIndex + 1];
+
+    Assert(taskRunCommand.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase), $"Expected hidden PowerShell window style: {taskRunCommand}");
+    Assert(taskRunCommand.Contains("-NonInteractive", StringComparison.OrdinalIgnoreCase), $"Expected non-interactive PowerShell execution: {taskRunCommand}");
+    Assert(taskRunCommand.Contains("-ExecutionPolicy Bypass", StringComparison.OrdinalIgnoreCase), $"Expected execution policy bypass: {taskRunCommand}");
+    Assert(taskRunCommand.Contains("-File ", StringComparison.OrdinalIgnoreCase), $"Expected generated script file invocation: {taskRunCommand}");
+    return Task.CompletedTask;
+}
+
 static Task MinuteSchedulesEmitSchtasksMinuteCadence()
 {
     var profile = ValidProfile();
@@ -820,6 +838,25 @@ static Task BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives()
     Assert(unprotectedItem.Severity == DriveSecuritySeverity.Warning, "Expected unprotected drive to warn.");
     Assert(lockedItem.State == DriveSecurityState.Locked, "Expected locked state.");
     Assert(lockedItem.Severity == DriveSecuritySeverity.Error, "Expected locked drive to error.");
+    return Task.CompletedTask;
+}
+
+static Task BitLockerAccessDeniedReasonIsActionable()
+{
+    var formatter = typeof(PowerShellBitLockerStatusProvider).GetMethod(
+        "FormatUnknownReason",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+    if (formatter is null)
+    {
+        throw new InvalidOperationException("Expected BitLocker unknown reason formatter.");
+    }
+
+    var formatted = (string)formatter.Invoke(null, [@"D:\", "Get-CimInstance : Access denied"])!;
+
+    Assert(formatted.Contains(@"D:\", StringComparison.OrdinalIgnoreCase), $"Expected drive root in formatted reason: {formatted}");
+    Assert(formatted.Contains("elevated permissions", StringComparison.OrdinalIgnoreCase), $"Expected actionable elevation guidance: {formatted}");
+    Assert(!formatted.Contains("Get-CimInstance", StringComparison.OrdinalIgnoreCase), $"Expected raw PowerShell command text to be hidden: {formatted}");
     return Task.CompletedTask;
 }
 
