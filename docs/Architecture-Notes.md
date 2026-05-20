@@ -30,6 +30,9 @@ Initial mitigations now implemented:
 - hashing uses streams instead of whole-file reads
 - payload copies preserve source last-write timestamps
 - unchanged comparisons first check file size and timestamp before falling back to SHA-256 hashing
+- prepare manifests include per-file entries with relative path, size, last-write timestamp, and SHA-256
+- dock and receive use manifest entries first, so drifted-timestamp matches can be verified from the local file hash without re-reading the shuttle payload
+- `state\latest-depart.json` is the fast path for finding the active inbound manifest
 
 Remaining target implementation:
 
@@ -37,5 +40,6 @@ Remaining target implementation:
 - report richer progress with bytes, current relative path, phase, and elapsed time
 - write operation logs incrementally to disk
 - keep UI output summarized and tail-based
-- use incremental manifests so unchanged files can avoid most scans and support durable resume/retry
+- split large manifest indexes into separate durable job artifacts if JSON size becomes painful
+- support durable resume/retry
 - consider rclone or Git engines for large trees instead of custom file-copy logic

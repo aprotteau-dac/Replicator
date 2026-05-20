@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
 using Replicator.Core.Availability;
 using Replicator.Core.Models;
 using Replicator.Core.Scheduling;
@@ -6,7 +8,7 @@ using Replicator.Core.Security;
 using Replicator.Core.Shuttle;
 using Replicator.Core.Storage;
 
-var tests = new (string Name, Func<Task> Test)[]
+var tests = new List<(string Name, Func<Task> Test)>
 {
     ("validator rejects destinations under the source tree", ValidatorRejectsNestedDestination),
     ("script generator emits robocopy dry-run script", ScriptGeneratorEmitsDryRunScript),
@@ -14,6 +16,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
     ("shuttle prepare preserves timestamps for fast skip analysis", ShuttlePreparePreservesTimestampsForFastSkipAnalysis),
+    ("shuttle dock compares drifted local files against manifest hash", ShuttleDockComparesDriftedLocalFilesAgainstManifestHash),
     ("shuttle prepare reports file progress", ShuttlePrepareReportsFileProgress),
     ("shuttle operations honor cancellation", ShuttleOperationsHonorCancellation),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
@@ -25,6 +28,11 @@ var tests = new (string Name, Func<Task> Test)[]
     ("bitlocker parser classifies protected unprotected and locked drives", BitLockerParserClassifiesProtectedUnprotectedAndLockedDrives),
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
+
+if (Environment.GetEnvironmentVariable("REPLICATOR_LONG_SHUTTLE_SMOKE") == "1")
+{
+    tests.Add(("long shuttle manifest smoke handles 6500 skipped files", ShuttleLongManifestSmokeHandles6500SkippedFiles));
+}
 
 var failures = 0;
 
@@ -49,7 +57,7 @@ if (failures > 0)
     return 1;
 }
 
-Console.WriteLine($"{tests.Length} test(s) passed.");
+Console.WriteLine($"{tests.Count} test(s) passed.");
 return 0;
 
 static Task ValidatorRejectsNestedDestination()
@@ -251,15 +259,136 @@ static async Task ShuttlePreparePreservesTimestampsForFastSkipAnalysis()
         Assert(prepare.Succeeded, prepare.Message);
         Assert(File.Exists(payloadFile), "Expected shuttle payload file.");
         Assert(TimestampsWithinTolerance(File.GetLastWriteTimeUtc(payloadFile), expectedTimestamp), "Expected prepared payload to preserve source timestamp.");
+        Assert(prepare.Manifest?.Entries.Count == 1, "Expected prepare manifest to include one file entry.");
+        Assert(prepare.Manifest?.Entries[0].RelativePath == "note.md", "Expected normalized manifest relative path.");
+        Assert(prepare.Manifest?.Entries[0].Sha256 == Sha256(sourceFile), "Expected manifest entry hash to match source file.");
 
         var depart = await home.DepartAsync(homeProfile);
         Assert(depart.Succeeded, depart.Message);
+        Assert(depart.Manifest?.Entries.Count == 1, "Expected depart manifest to preserve file entries.");
 
         var dock = await work.DockAsync(workProfile);
         Assert(dock.Succeeded, dock.Message);
         Assert(dock.Manifest?.SkippedFiles == 1, "Expected matching inbound file to be skipped.");
         Assert(dock.Manifest?.ChangedFiles == 0, "Expected no changed files for matching inbound payload.");
         Assert(dock.Manifest?.ConflictFiles == 0, "Expected no conflicts for matching inbound payload.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttleDockComparesDriftedLocalFilesAgainstManifestHash()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var homeSource = Path.Combine(root, "home", "repo");
+    var workSource = Path.Combine(root, "work", "repo");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+
+    Directory.CreateDirectory(homeSource);
+    Directory.CreateDirectory(workSource);
+
+    try
+    {
+        var sourceFile = Path.Combine(homeSource, "note.md");
+        var workFile = Path.Combine(workSource, "note.md");
+
+        File.WriteAllText(sourceFile, "same content");
+        File.WriteAllText(workFile, "same content");
+        File.SetLastWriteTimeUtc(sourceFile, new DateTime(2026, 1, 2, 3, 4, 6, DateTimeKind.Utc));
+        File.SetLastWriteTimeUtc(workFile, new DateTime(2026, 1, 2, 4, 4, 6, DateTimeKind.Utc));
+
+        var profileId = Guid.NewGuid();
+        var homeProfile = ValidShuttleProfile(profileId, homeSource, shuttleRoot);
+        var workProfile = ValidShuttleProfile(profileId, workSource, shuttleRoot);
+
+        var home = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+        var work = new ShuttleService(new MachineIdentity("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "WORK"));
+
+        var prepare = await home.PrepareAsync(homeProfile);
+        Assert(prepare.Succeeded, prepare.Message);
+
+        var depart = await home.DepartAsync(homeProfile);
+        Assert(depart.Succeeded, depart.Message);
+
+        var dock = await work.DockAsync(workProfile);
+        Assert(dock.Succeeded, dock.Message);
+        Assert(dock.Manifest?.SkippedFiles == 1, "Expected same-content file with drifted timestamp to be skipped by manifest hash.");
+        Assert(dock.Manifest?.ChangedFiles == 0, "Expected manifest hash comparison to avoid a false change.");
+        Assert(dock.Manifest?.ConflictFiles == 0, "Expected manifest hash comparison to avoid a false conflict.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ShuttleLongManifestSmokeHandles6500SkippedFiles()
+{
+    const int fileCount = 6500;
+
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var homeSource = Path.Combine(root, "home", "repo");
+    var workSource = Path.Combine(root, "work", "repo");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+
+    Directory.CreateDirectory(homeSource);
+    Directory.CreateDirectory(workSource);
+
+    try
+    {
+        var homeTimestamp = new DateTime(2026, 1, 2, 3, 4, 6, DateTimeKind.Utc);
+        var workTimestamp = homeTimestamp.AddHours(1);
+
+        for (var index = 0; index < fileCount; index++)
+        {
+            var relativeDirectory = Path.Combine($"bucket-{index % 100:000}", $"slice-{index % 10:00}");
+            var homeDirectory = Path.Combine(homeSource, relativeDirectory);
+            var workDirectory = Path.Combine(workSource, relativeDirectory);
+            Directory.CreateDirectory(homeDirectory);
+            Directory.CreateDirectory(workDirectory);
+
+            var fileName = $"file-{index:00000}.md";
+            var homeFile = Path.Combine(homeDirectory, fileName);
+            var workFile = Path.Combine(workDirectory, fileName);
+            var content = $"same content {index:00000}{Environment.NewLine}";
+
+            File.WriteAllText(homeFile, content);
+            File.WriteAllText(workFile, content);
+            File.SetLastWriteTimeUtc(homeFile, homeTimestamp);
+            File.SetLastWriteTimeUtc(workFile, workTimestamp);
+        }
+
+        var profileId = Guid.NewGuid();
+        var homeProfile = ValidShuttleProfile(profileId, homeSource, shuttleRoot);
+        var workProfile = ValidShuttleProfile(profileId, workSource, shuttleRoot);
+
+        var home = new ShuttleService(new MachineIdentity("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "HOME"));
+        var work = new ShuttleService(new MachineIdentity("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "WORK"));
+
+        var prepare = await home.PrepareAsync(homeProfile);
+        Assert(prepare.Succeeded, prepare.Message);
+        Assert(prepare.Manifest?.Entries.Count == fileCount, $"Expected {fileCount} manifest entries.");
+
+        var depart = await home.DepartAsync(homeProfile);
+        Assert(depart.Succeeded, depart.Message);
+
+        var stopwatch = Stopwatch.StartNew();
+        var dock = await work.DockAsync(workProfile);
+        stopwatch.Stop();
+
+        Assert(dock.Succeeded, dock.Message);
+        Assert(dock.Manifest?.SkippedFiles == fileCount, $"Expected {fileCount} skipped files.");
+        Assert(dock.Manifest?.ChangedFiles == 0, "Expected no changed files.");
+        Assert(dock.Manifest?.ConflictFiles == 0, "Expected no conflicts.");
+        Console.WriteLine($"INFO long shuttle dock analyzed {fileCount} skipped files in {stopwatch.Elapsed.TotalSeconds:0.00}s.");
     }
     finally
     {
@@ -623,6 +752,12 @@ static void Assert(bool condition, string message)
 static bool TimestampsWithinTolerance(DateTime first, DateTime second)
 {
     return (first - second).Duration() <= TimeSpan.FromSeconds(2);
+}
+
+static string Sha256(string path)
+{
+    using var stream = File.OpenRead(path);
+    return Convert.ToHexString(SHA256.HashData(stream));
 }
 
 static IReadOnlyList<string> BuildScheduledTaskArguments(BackupProfile profile)

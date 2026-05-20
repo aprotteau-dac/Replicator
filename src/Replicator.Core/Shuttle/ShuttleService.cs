@@ -53,6 +53,9 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return new ShuttleOperationResult(false, $"Source path is unavailable: {profile.SourcePath}", null);
         }
 
+        var previousPrepareManifest = await ReadStateManifestAsync(paths, $"latest-prepare-{machineIdentity.MachineId}.json", cancellationToken);
+        var previousEntries = CreateEntryLookup(previousPrepareManifest?.Entries ?? []);
+
         ReportProgress(progress, ShuttleOperationKind.Prepare, 0, 0, "Scanning source files...");
         var sourceFiles = EnumerateSourceFiles(profile, cancellationToken).ToList();
         var manifest = CreateManifest(profile, paths, ShuttleOperationKind.Prepare, readyToDock: false, startedAt);
@@ -67,10 +70,14 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
             processedFiles++;
             manifest.TotalFiles++;
-            var relativePath = Path.GetRelativePath(profile.SourcePath, sourceFile);
-            var payloadPath = Path.Combine(paths.PayloadDirectory, relativePath);
+            var relativePath = NormalizeRelativePath(Path.GetRelativePath(profile.SourcePath, sourceFile));
+            previousEntries.TryGetValue(relativePath, out var previousEntry);
+            var sourceEntry = CreateFileEntry(relativePath, sourceFile, previousEntry);
+            manifest.Entries.Add(sourceEntry);
+
+            var payloadPath = CombineUnderRoot(paths.PayloadDirectory, relativePath);
             var payloadExists = File.Exists(payloadPath);
-            var shouldCopy = !payloadExists || !FilesMatch(sourceFile, payloadPath);
+            var shouldCopy = !payloadExists || !FileMatchesEntry(sourceEntry, payloadPath);
 
             if (!shouldCopy)
             {
@@ -191,7 +198,9 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         }
 
         var inboundManifest = await ReadLatestReadyToDockManifestAsync(paths, cancellationToken);
-        if (inboundManifest is null || inboundManifest.FromMachineId == machineIdentity.MachineId)
+        if (inboundManifest is null ||
+            inboundManifest.FromMachineId == machineIdentity.MachineId ||
+            IsReceived(paths, inboundManifest))
         {
             return new ShuttleOperationResult(true, "No inbound shuttle changes are waiting for this machine.", inboundManifest);
         }
@@ -225,7 +234,9 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         }
 
         var inboundManifest = await ReadLatestReadyToDockManifestAsync(paths, cancellationToken);
-        if (inboundManifest is null || inboundManifest.FromMachineId == machineIdentity.MachineId)
+        if (inboundManifest is null ||
+            inboundManifest.FromMachineId == machineIdentity.MachineId ||
+            IsReceived(paths, inboundManifest))
         {
             return new ShuttleOperationResult(true, "No inbound shuttle changes are waiting for this machine.", inboundManifest);
         }
@@ -242,21 +253,34 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
 
         var conflictRoot = Path.Combine(paths.ConflictsDirectory, DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss"));
         var details = new List<string>();
-        var payloadFiles = Directory.Exists(paths.PayloadDirectory)
-            ? EnumerateFiles(paths.PayloadDirectory, cancellationToken).ToList()
-            : [];
+        var payloadEntries = GetPayloadEntries(paths, inboundManifest, cancellationToken);
+        if (inboundManifest.Entries.Count == 0 && payloadEntries.Count > 0)
+        {
+            receiveManifest.Warnings.Add("Inbound manifest has no file index; fell back to payload scan.");
+        }
+
         var processedFiles = 0;
 
-        ReportProgress(progress, ShuttleOperationKind.Receive, 0, payloadFiles.Count, "Receiving shuttle payload...");
+        ReportProgress(progress, ShuttleOperationKind.Receive, 0, payloadEntries.Count, "Receiving shuttle payload...");
 
-        foreach (var payloadFile in payloadFiles)
+        foreach (var entry in payloadEntries)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             processedFiles++;
             receiveManifest.TotalFiles++;
-            var relativePath = Path.GetRelativePath(paths.PayloadDirectory, payloadFile);
-            var localPath = Path.Combine(profile.SourcePath, relativePath);
+            receiveManifest.Entries.Add(entry);
+
+            var relativePath = entry.RelativePath;
+            var payloadFile = CombineUnderRoot(paths.PayloadDirectory, relativePath);
+            if (!File.Exists(payloadFile))
+            {
+                receiveManifest.Warnings.Add($"Payload file is missing: {relativePath}");
+                ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadEntries.Count, $"Checked {processedFiles} of {payloadEntries.Count} files.");
+                continue;
+            }
+
+            var localPath = CombineUnderRoot(profile.SourcePath, relativePath);
 
             if (!File.Exists(localPath))
             {
@@ -264,14 +288,14 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
                 receiveManifest.CopiedFiles++;
                 CopyFile(payloadFile, localPath);
                 AddDetail(details, $"Received new {relativePath}");
-                ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadFiles.Count, $"Received {processedFiles} of {payloadFiles.Count} files.");
+                ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadEntries.Count, $"Received {processedFiles} of {payloadEntries.Count} files.");
                 continue;
             }
 
-            if (FilesMatch(payloadFile, localPath))
+            if (FileMatchesEntry(entry, localPath))
             {
                 receiveManifest.SkippedFiles++;
-                ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadFiles.Count, $"Checked {processedFiles} of {payloadFiles.Count} files.");
+                ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadEntries.Count, $"Checked {processedFiles} of {payloadEntries.Count} files.");
                 continue;
             }
 
@@ -283,7 +307,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             CopyFile(localPath, conflictPath);
             CopyFile(payloadFile, localPath);
             AddDetail(details, $"Received changed {relativePath}; preserved local copy under conflicts.");
-            ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadFiles.Count, $"Received {processedFiles} of {payloadFiles.Count} files.");
+            ReportFileProgress(progress, ShuttleOperationKind.Receive, processedFiles, payloadEntries.Count, $"Received {processedFiles} of {payloadEntries.Count} files.");
         }
 
         receiveManifest.CompletedAt = DateTimeOffset.UtcNow;
@@ -292,7 +316,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             ReceivedMarkerPath(paths, inboundManifest),
             DateTimeOffset.UtcNow.ToString("O"),
             cancellationToken);
-        ReportProgress(progress, ShuttleOperationKind.Receive, payloadFiles.Count, payloadFiles.Count, "Receive completed.");
+        ReportProgress(progress, ShuttleOperationKind.Receive, payloadEntries.Count, payloadEntries.Count, "Receive completed.");
 
         return new ShuttleOperationResult(
             true,
@@ -378,25 +402,40 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             return manifest;
         }
 
-        var payloadFiles = EnumerateFiles(paths.PayloadDirectory, cancellationToken).ToList();
+        var payloadEntries = GetPayloadEntries(paths, inboundManifest, cancellationToken);
+        if (inboundManifest.Entries.Count == 0 && payloadEntries.Count > 0)
+        {
+            manifest.Warnings.Add("Inbound manifest has no file index; fell back to payload scan.");
+        }
+
         var processedFiles = 0;
 
-        ReportProgress(progress, ShuttleOperationKind.Dock, 0, payloadFiles.Count, "Analyzing inbound shuttle payload...");
+        ReportProgress(progress, ShuttleOperationKind.Dock, 0, payloadEntries.Count, "Analyzing inbound shuttle payload...");
 
-        foreach (var payloadFile in payloadFiles)
+        foreach (var entry in payloadEntries)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             processedFiles++;
             manifest.TotalFiles++;
-            var relativePath = Path.GetRelativePath(paths.PayloadDirectory, payloadFile);
-            var localPath = Path.Combine(profile.SourcePath, relativePath);
+            manifest.Entries.Add(entry);
+
+            var relativePath = entry.RelativePath;
+            var payloadPath = CombineUnderRoot(paths.PayloadDirectory, relativePath);
+            if (!File.Exists(payloadPath))
+            {
+                manifest.Warnings.Add($"Payload file is missing: {relativePath}");
+                ReportFileProgress(progress, ShuttleOperationKind.Dock, processedFiles, payloadEntries.Count, $"Analyzed {processedFiles} of {payloadEntries.Count} files.");
+                continue;
+            }
+
+            var localPath = CombineUnderRoot(profile.SourcePath, relativePath);
 
             if (!File.Exists(localPath))
             {
                 manifest.NewFiles++;
             }
-            else if (!FilesMatch(payloadFile, localPath))
+            else if (!FileMatchesEntry(entry, localPath))
             {
                 manifest.ChangedFiles++;
                 manifest.ConflictFiles++;
@@ -406,11 +445,11 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
                 manifest.SkippedFiles++;
             }
 
-            ReportFileProgress(progress, ShuttleOperationKind.Dock, processedFiles, payloadFiles.Count, $"Analyzed {processedFiles} of {payloadFiles.Count} files.");
+            ReportFileProgress(progress, ShuttleOperationKind.Dock, processedFiles, payloadEntries.Count, $"Analyzed {processedFiles} of {payloadEntries.Count} files.");
         }
 
         manifest.CompletedAt = DateTimeOffset.UtcNow;
-        ReportProgress(progress, ShuttleOperationKind.Dock, payloadFiles.Count, payloadFiles.Count, "Dock analysis completed.");
+        ReportProgress(progress, ShuttleOperationKind.Dock, payloadEntries.Count, payloadEntries.Count, "Dock analysis completed.");
         return manifest;
     }
 
@@ -459,30 +498,133 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         return false;
     }
 
-    private static bool FilesMatch(string firstPath, string secondPath)
+    private static IReadOnlyList<ShuttleManifestEntry> GetPayloadEntries(
+        ShuttlePaths paths,
+        ShuttleManifest inboundManifest,
+        CancellationToken cancellationToken)
     {
-        var first = new FileInfo(firstPath);
-        var second = new FileInfo(secondPath);
-        if (!first.Exists || !second.Exists || first.Length != second.Length)
+        if (inboundManifest.Entries.Count > 0)
+        {
+            return inboundManifest.Entries;
+        }
+
+        if (!Directory.Exists(paths.PayloadDirectory))
+        {
+            return [];
+        }
+
+        return EnumerateFiles(paths.PayloadDirectory, cancellationToken)
+            .Select(payloadFile =>
+            {
+                var relativePath = NormalizeRelativePath(Path.GetRelativePath(paths.PayloadDirectory, payloadFile));
+                return CreateFileEntry(relativePath, payloadFile, previousEntry: null);
+            })
+            .ToList();
+    }
+
+    private static Dictionary<string, ShuttleManifestEntry> CreateEntryLookup(IEnumerable<ShuttleManifestEntry> entries)
+    {
+        var lookup = new Dictionary<string, ShuttleManifestEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.RelativePath))
+            {
+                lookup[NormalizeRelativePath(entry.RelativePath)] = entry;
+            }
+        }
+
+        return lookup;
+    }
+
+    private static ShuttleManifestEntry CreateFileEntry(
+        string relativePath,
+        string filePath,
+        ShuttleManifestEntry? previousEntry)
+    {
+        var info = new FileInfo(filePath);
+        if (!info.Exists)
+        {
+            throw new FileNotFoundException("Cannot create a shuttle manifest entry for a missing file.", filePath);
+        }
+
+        var normalizedRelativePath = NormalizeRelativePath(relativePath);
+        var sha256 = previousEntry is not null &&
+                     EntryMetadataMatchesFile(previousEntry, info) &&
+                     !string.IsNullOrWhiteSpace(previousEntry.Sha256)
+            ? previousEntry.Sha256
+            : HashFile(filePath);
+
+        return new ShuttleManifestEntry
+        {
+            RelativePath = normalizedRelativePath,
+            Length = info.Length,
+            LastWriteTimeUtc = info.LastWriteTimeUtc,
+            Sha256 = sha256
+        };
+    }
+
+    private static bool EntryMetadataMatchesFile(ShuttleManifestEntry entry, FileInfo file)
+    {
+        return file.Exists &&
+               file.Length == entry.Length &&
+               TimestampsMatch(file.LastWriteTimeUtc, entry.LastWriteTimeUtc);
+    }
+
+    private static bool FileMatchesEntry(ShuttleManifestEntry entry, string filePath)
+    {
+        var file = new FileInfo(filePath);
+        if (!file.Exists || file.Length != entry.Length)
         {
             return false;
         }
 
-        if (TimestampsMatch(first.LastWriteTimeUtc, second.LastWriteTimeUtc))
+        if (TimestampsMatch(file.LastWriteTimeUtc, entry.LastWriteTimeUtc))
         {
             return true;
         }
 
-        using var firstStream = File.OpenRead(firstPath);
-        using var secondStream = File.OpenRead(secondPath);
+        return !string.IsNullOrWhiteSpace(entry.Sha256) &&
+               HashFile(filePath).Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase);
+    }
 
-        return Convert.ToHexString(SHA256.HashData(firstStream))
-            .Equals(Convert.ToHexString(SHA256.HashData(secondStream)), StringComparison.OrdinalIgnoreCase);
+    private static string HashFile(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream));
     }
 
     private static bool TimestampsMatch(DateTime first, DateTime second)
     {
         return (first - second).Duration() <= MetadataTimestampTolerance;
+    }
+
+    private static string NormalizeRelativePath(string relativePath)
+    {
+        return relativePath
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static string CombineUnderRoot(string root, string relativePath)
+    {
+        if (Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidOperationException($"Shuttle manifest path must be relative: {relativePath}");
+        }
+
+        var fullRoot = Path.GetFullPath(root);
+        var localRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        var candidate = Path.GetFullPath(Path.Combine(fullRoot, localRelativePath));
+        var rootWithSeparator = Path.EndsInDirectorySeparator(fullRoot)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
+
+        if (!candidate.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Shuttle manifest path escapes the managed root: {relativePath}");
+        }
+
+        return candidate;
     }
 
     private static void CopyFile(string sourcePath, string destinationPath)
@@ -535,6 +677,12 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
         ShuttlePaths paths,
         CancellationToken cancellationToken)
     {
+        var latestDepart = await ReadStateManifestAsync(paths, "latest-depart.json", cancellationToken);
+        if (latestDepart?.ReadyToDock == true)
+        {
+            return latestDepart;
+        }
+
         if (!Directory.Exists(paths.ManifestsDirectory))
         {
             return null;
@@ -587,6 +735,7 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
     {
         return new ShuttleManifest
         {
+            SchemaVersion = source.SchemaVersion,
             ProfileId = source.ProfileId,
             ProfileName = source.ProfileName,
             Operation = operation,
@@ -606,6 +755,15 @@ public sealed class ShuttleService(MachineIdentity machineIdentity)
             NewFiles = source.NewFiles,
             ChangedFiles = source.ChangedFiles,
             ConflictFiles = source.ConflictFiles,
+            Entries = source.Entries
+                .Select(entry => new ShuttleManifestEntry
+                {
+                    RelativePath = entry.RelativePath,
+                    Length = entry.Length,
+                    LastWriteTimeUtc = entry.LastWriteTimeUtc,
+                    Sha256 = entry.Sha256
+                })
+                .ToList(),
             Warnings = [.. source.Warnings]
         };
     }

@@ -2,6 +2,8 @@ namespace Replicator.Core.Shuttle;
 
 public sealed class ShuttleManifest
 {
+    public int SchemaVersion { get; set; } = 2;
+
     public Guid ManifestId { get; set; } = Guid.NewGuid();
 
     public Guid ProfileId { get; set; }
@@ -46,5 +48,18 @@ public sealed class ShuttleManifest
 
     public int ConflictFiles { get; set; }
 
+    public List<ShuttleManifestEntry> Entries { get; set; } = [];
+
     public List<string> Warnings { get; set; } = [];
+}
+
+public sealed class ShuttleManifestEntry
+{
+    public string RelativePath { get; set; } = string.Empty;
+
+    public long Length { get; set; }
+
+    public DateTime LastWriteTimeUtc { get; set; }
+
+    public string Sha256 { get; set; } = string.Empty;
 }

@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-15 test(s) passed.
+17 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -25,6 +25,7 @@ This gate covers:
 - robocopy log parsing
 - JSON profile storage
 - shuttle prepare, depart, dock, receive, and conflict preservation
+- shuttle manifest file entries and hash-backed skip analysis
 - shuttle progress reporting
 - shuttle cancellation token handling
 - scheduled task naming
@@ -33,6 +34,16 @@ This gate covers:
 - availability checks for missing source, creatable target, and unavailable drive
 - BitLocker parser classification
 - profile drive-security summary behavior
+
+Optional long shuttle smoke:
+
+```powershell
+$env:REPLICATOR_LONG_SHUTTLE_SMOKE = '1'
+dotnet run --project tests\Replicator.Tests\Replicator.Tests.csproj
+Remove-Item Env:\REPLICATOR_LONG_SHUTTLE_SMOKE
+```
+
+Expected result: the extra long smoke creates 6,500 matching files with drifted local timestamps, docks them as skips through manifest-hash comparison, and prints the elapsed dock-analysis time.
 
 ## Manual Windows Smoke
 
