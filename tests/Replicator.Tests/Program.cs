@@ -28,6 +28,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("shuttle metadata operations block missing source", ShuttleMetadataOperationsBlockMissingSource),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
     ("scheduled task action runs hidden noninteractive powershell", ScheduledTaskActionRunsHiddenNonInteractivePowerShell),
+    ("scheduled task action inspector flags visible powershell actions", ScheduledTaskActionInspectorFlagsVisiblePowerShellActions),
+    ("scheduled task action inspector flags mismatched script paths", ScheduledTaskActionInspectorFlagsMismatchedScriptPaths),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
     ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes),
     ("validator rejects invalid minute interval", ValidatorRejectsInvalidMinuteInterval),
@@ -770,6 +772,62 @@ static Task ScheduledTaskActionRunsHiddenNonInteractivePowerShell()
     Assert(taskRunCommand.Contains("-NonInteractive", StringComparison.OrdinalIgnoreCase), $"Expected non-interactive PowerShell execution: {taskRunCommand}");
     Assert(taskRunCommand.Contains("-ExecutionPolicy Bypass", StringComparison.OrdinalIgnoreCase), $"Expected execution policy bypass: {taskRunCommand}");
     Assert(taskRunCommand.Contains("-File ", StringComparison.OrdinalIgnoreCase), $"Expected generated script file invocation: {taskRunCommand}");
+    return Task.CompletedTask;
+}
+
+static Task ScheduledTaskActionInspectorFlagsVisiblePowerShellActions()
+{
+    var scriptPath = Path.Combine(Path.GetTempPath(), $"replicator-{Guid.NewGuid():N}.ps1");
+    File.WriteAllText(scriptPath, "# test");
+
+    try
+    {
+        var action = $"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"";
+
+        var health = ScheduledTaskActionInspector.Inspect(action, scriptPath);
+
+        Assert(health.NeedsRepair, "Expected visible/noninteractive-missing action to need repair.");
+        Assert(health.ScriptPath == scriptPath, $"Unexpected script path: {health.ScriptPath}");
+        Assert(health.ScriptExists, "Expected script to exist.");
+        Assert(health.RepairReasons.Any(reason => reason.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase)), "Expected hidden-window repair reason.");
+        Assert(health.RepairReasons.Any(reason => reason.Contains("-NonInteractive", StringComparison.OrdinalIgnoreCase)), "Expected noninteractive repair reason.");
+    }
+    finally
+    {
+        if (File.Exists(scriptPath))
+        {
+            File.Delete(scriptPath);
+        }
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task ScheduledTaskActionInspectorFlagsMismatchedScriptPaths()
+{
+    var expected = Path.Combine(Path.GetTempPath(), $"expected-{Guid.NewGuid():N}.ps1");
+    var actual = Path.Combine(Path.GetTempPath(), $"actual-{Guid.NewGuid():N}.ps1");
+    File.WriteAllText(actual, "# test");
+
+    try
+    {
+        var action = $"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{actual}\"";
+
+        var health = ScheduledTaskActionInspector.Inspect(action, expected);
+
+        Assert(health.NeedsRepair, "Expected mismatched script path to need repair.");
+        Assert(health.ScriptPath == actual, $"Unexpected parsed script path: {health.ScriptPath}");
+        Assert(health.ScriptExists, "Expected actual script to exist.");
+        Assert(health.RepairReasons.Any(reason => reason.Contains("does not match", StringComparison.OrdinalIgnoreCase)), "Expected path mismatch repair reason.");
+    }
+    finally
+    {
+        if (File.Exists(actual))
+        {
+            File.Delete(actual);
+        }
+    }
+
     return Task.CompletedTask;
 }
 
