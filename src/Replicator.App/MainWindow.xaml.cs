@@ -28,8 +28,10 @@ public partial class MainWindow : Window
     private readonly ShuttleService _shuttleService;
     private readonly ProcessRunner _processRunner;
     private readonly IScheduledTaskService _scheduledTasks;
+    private readonly IScheduledTaskInventoryService _taskInventoryService;
     private readonly ObservableCollection<BackupProfile> _profiles = [];
     private ScheduledTaskSnapshot? _currentTaskSnapshot;
+    private ScheduledTaskInventoryResult? _taskInventory;
     private CancellationTokenSource? _currentOperationCancellationSource;
     private bool _isBusy;
     private bool _loadingProfile;
@@ -49,6 +51,7 @@ public partial class MainWindow : Window
         _runStatusReader = new BackupRunStatusReader(_paths.LogsDirectory);
         _shuttleService = new ShuttleService(new MachineIdentityProvider(_paths.MachineIdentityFile).GetOrCreate());
         _scheduledTasks = new WindowsScheduledTaskService(_processRunner);
+        _taskInventoryService = new WindowsScheduledTaskInventoryService(_processRunner);
 
         ProfilesList.ItemsSource = _profiles;
         ModeComboBox.ItemsSource = Enum.GetValues<ProfileMode>();
@@ -79,6 +82,7 @@ public partial class MainWindow : Window
         ProfilesList.SelectedIndex = 0;
         UpdateActionSurface(GetSelectedProfile(showStatus: false), _currentTaskSnapshot);
         ShowStatus("Ready.", true);
+        await RefreshTaskInventoryAsync();
     }
 
     private void NewProfile_Click(object sender, RoutedEventArgs e)
@@ -88,6 +92,7 @@ public partial class MainWindow : Window
         ProfilesList.SelectedItem = profile;
         _currentTaskSnapshot = null;
         UpdateActionSurface(profile, null);
+        ShowTaskActionCenter(_taskInventory);
         ShowStatus("New profile created.", true);
     }
 
@@ -124,6 +129,7 @@ public partial class MainWindow : Window
         UpdateActionSurface(GetSelectedProfile(showStatus: false), null);
         AppendOutput(taskResult.Output);
         ShowStatus("Profile removed.", true);
+        await RefreshTaskInventoryAsync();
     }
 
     private async void ProfilesList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -132,11 +138,13 @@ public partial class MainWindow : Window
         _currentTaskSnapshot = null;
         LoadProfileIntoForm(profile);
         UpdateActionSurface(profile, null);
+        ShowTaskActionCenter(_taskInventory);
 
         if (profile is not null)
         {
             await RefreshTaskStatusAsync(profile);
             await RefreshDriveSecurityAsync(profile);
+            ShowTaskActionCenter(_taskInventory);
         }
     }
 
@@ -207,13 +215,12 @@ public partial class MainWindow : Window
                 return;
             }
 
-            await _profileStore.UpsertAsync(profile);
-            var script = await _scriptGenerator.WriteAsync(profile);
-            var result = await _scheduledTasks.InstallOrUpdateAsync(profile, script.Path);
+            var result = await InstallOrUpdateTaskForProfileAsync(profile);
 
             AppendOutput(result.Output);
             ShowStatus(result.Message, result.Succeeded);
             await RefreshTaskStatusAsync(profile);
+            await RefreshTaskInventoryAsync();
         });
     }
 
@@ -306,7 +313,53 @@ public partial class MainWindow : Window
             await RefreshTaskStatusAsync(profile);
             await RefreshDriveSecurityAsync(profile);
             ShowLatestRun(profile);
+            await RefreshTaskInventoryAsync();
         }
+    }
+
+    private async void ReviewTaskInventory_Click(object sender, RoutedEventArgs e)
+    {
+        if (_taskInventory is null)
+        {
+            await RefreshTaskInventoryAsync();
+        }
+
+        if (_taskInventory is null || _taskInventory.Items.Count == 0)
+        {
+            ShowStatus("No Replicator scheduled tasks were found.", true);
+            return;
+        }
+
+        var window = new ScheduledTaskInventoryWindow(_taskInventory)
+        {
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        window.ShowDialog();
+    }
+
+    private async void RepairSelectedInventoryTask_Click(object sender, RoutedEventArgs e)
+    {
+        await RunBusyAsync("Repairing scheduled task...", async () =>
+        {
+            if (!TryApplyForm(out var profile))
+            {
+                return;
+            }
+
+            var repairItem = GetSelectedProfileRepairItem();
+            if (repairItem is null)
+            {
+                ShowStatus("No repairable scheduled task is selected.", false);
+                return;
+            }
+
+            var result = await InstallOrUpdateTaskForProfileAsync(profile);
+            AppendOutput(result.Output);
+            ShowStatus(result.Message, result.Succeeded);
+            await RefreshTaskStatusAsync(profile);
+            await RefreshTaskInventoryAsync();
+        });
     }
 
     private async void PrepareShuttle_Click(object sender, RoutedEventArgs e)
@@ -348,6 +401,7 @@ public partial class MainWindow : Window
         HeaderTextBlock.Text = profile.Name;
         ShowStatus("Profile saved.", true);
         await RefreshDriveSecurityAsync(profile);
+        await RefreshTaskInventoryAsync();
     }
 
     private async Task ChangeTaskAsync(Func<BackupProfile, Task<TaskOperationResult>> operation)
@@ -364,6 +418,7 @@ public partial class MainWindow : Window
             AppendOutput(result.Output);
             ShowStatus(result.Message, result.Succeeded);
             await RefreshTaskStatusAsync(profile);
+            await RefreshTaskInventoryAsync();
         });
     }
 
@@ -404,6 +459,79 @@ public partial class MainWindow : Window
             : $"{snapshot.State} | {profile.Engine} | {profile.Target.Kind}";
         ApplyTaskStatusBrushes(snapshot);
         UpdateActionSurface(profile, snapshot);
+        ShowTaskActionCenter(_taskInventory);
+    }
+
+    private async Task RefreshTaskInventoryAsync()
+    {
+        try
+        {
+            var expectedPaths = _profiles.ToDictionary(profile => profile.Id, profile => _scriptGenerator.ScriptPathFor(profile));
+            _taskInventory = await _taskInventoryService.ScanAsync(_profiles.ToList(), expectedPaths);
+        }
+        catch (Exception exception)
+        {
+            _taskInventory = BuildInventoryFailure(exception);
+        }
+
+        ShowTaskActionCenter(_taskInventory);
+    }
+
+    private void ShowTaskActionCenter(ScheduledTaskInventoryResult? inventory)
+    {
+        if (inventory is null || !inventory.Summary.HasIssues)
+        {
+            TaskActionCenterPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        TaskActionCenterPanel.Visibility = Visibility.Visible;
+        TaskActionCenterTitleTextBlock.Text = "Scheduled task review needed";
+        TaskActionCenterSummaryTextBlock.Text = inventory.Summary.ToDisplayString();
+        ReviewTaskInventoryButton.IsEnabled = !_isBusy && inventory.Items.Count > 0;
+        RepairSelectedInventoryTaskButton.IsEnabled = !_isBusy && GetSelectedProfileRepairItem() is not null;
+    }
+
+    private ScheduledTaskInventoryItem? GetSelectedProfileRepairItem()
+    {
+        var profile = GetSelectedProfile(showStatus: false);
+        if (profile is null || _taskInventory is null)
+        {
+            return null;
+        }
+
+        return _taskInventory.Items.FirstOrDefault(item => item.ProfileId == profile.Id && item.CanRepair);
+    }
+
+    private async Task<TaskOperationResult> InstallOrUpdateTaskForProfileAsync(BackupProfile profile)
+    {
+        await _profileStore.UpsertAsync(profile);
+        var script = await _scriptGenerator.WriteAsync(profile);
+        return await _scheduledTasks.InstallOrUpdateAsync(profile, script.Path);
+    }
+
+    private static ScheduledTaskInventoryResult BuildInventoryFailure(Exception exception)
+    {
+        var item = new ScheduledTaskInventoryItem(
+            @"\Replicator",
+            null,
+            "Task Scheduler",
+            ScheduledTaskInventoryState.Unknown,
+            ScheduledTaskState.Unknown,
+            string.Empty,
+            string.Empty,
+            0,
+            string.Empty,
+            string.Empty,
+            false,
+            [],
+            $"Failed to scan scheduled tasks. {exception.Message}",
+            exception.ToString());
+
+        return new ScheduledTaskInventoryResult(
+            [item],
+            new ScheduledTaskInventorySummary(1, 0, 0, 0, 0, 1),
+            exception.ToString());
     }
 
     private async Task RunScriptAsync(BackupProfile profile, bool forceDryRun)
@@ -836,6 +964,7 @@ public partial class MainWindow : Window
         ActivityProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ActivityProgressBar.IsIndeterminate = busy;
         UpdateActionSurface(GetSelectedProfile(showStatus: false), _currentTaskSnapshot);
+        ShowTaskActionCenter(_taskInventory);
         CancelOperationButton.Visibility = busy && _currentOperationCancellationSource is not null ? Visibility.Visible : Visibility.Collapsed;
         CancelOperationButton.IsEnabled = busy && _currentOperationCancellationSource is not null && !_currentOperationCancellationSource.IsCancellationRequested;
 
