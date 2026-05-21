@@ -23,7 +23,9 @@ Robocopy exit codes `0` through `7` are treated as successful.
 
 The app preflights source and destination availability before manual `Run Now` and `Preview Dry Run` operations. If the source drive, source path, or destination drive is unavailable, the run is stopped before launching PowerShell and the status banner names the unavailable path.
 
-Scheduled task scripts run through hidden, non-interactive PowerShell actions. `Refresh Status` inspects the selected profile's Task Scheduler action and shows `Repair Task` if an older action is visible, missing `-NonInteractive`, points at the wrong script, or points at a missing script. Repair rewrites the generated script and Task Scheduler action for that profile.
+Scheduled task scripts run through hidden, non-interactive PowerShell actions. On launch and refresh, Replicator scans scheduled tasks under `\Replicator\`. If it finds a stale, orphaned, or unknown task, the Action Center appears with a `Review Tasks` inventory.
+
+`Refresh Status` still inspects the selected profile's Task Scheduler action and shows `Repair Task` if an older action is visible, missing `-NonInteractive`, points at the wrong script, or points at a missing script. Repair rewrites the generated script and Task Scheduler action for that profile. Orphan adoption and deletion are not automatic; those tasks are visible in the inventory for diagnosis.
 
 Scheduled scripts also check the source and target roots before copying. If an external drive is unplugged or a source path is missing, the task fails cleanly, writes the error to the run log/status file, and retries naturally on the next scheduled cadence. If a dry run sees that the target path does not exist, it writes a clear latest status saying the real run would create the path and exits before robocopy.
 

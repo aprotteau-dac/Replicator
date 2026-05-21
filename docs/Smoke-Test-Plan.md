@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-33 test(s) passed.
+36 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -33,6 +33,7 @@ This gate covers:
 - scheduled task naming
 - hidden non-interactive scheduled task PowerShell action
 - scheduled task action repair detection for visible or stale PowerShell actions
+- scheduled task inventory classification and summary counts
 - minute schedule command generation and validation
 - generated backup script target preflight before robocopy
 - latest scheduled-run JSON status parsing
@@ -119,11 +120,16 @@ Pass criteria:
 8. Click `Disable Task`; confirm `Enable Task` appears.
 9. Click `Enable Task`; confirm `Disable Task` appears.
 10. Click `Remove Task`; confirm install/update controls return.
+11. If the Action Center appears, click `Review Tasks` and confirm the scheduled task inventory window opens.
+12. Confirm matched unhealthy rows can be repaired only when they are not running.
 
 Pass criteria:
 
 - task action buttons are conditional to the installed/enabled/disabled state
+- launch-time inventory scan surfaces an Action Center only when task review is needed
+- `Review Tasks` shows matched, orphaned, running, and unknown task states when present
 - stale visible or mismatched task actions show `Repair Task` and cannot be started until repaired
+- Action Center `Repair Task` rewrites the selected matched task through the normal install/update path
 - minute cadence installs successfully through Task Scheduler
 - on-demand scheduled task execution writes a log and latest status JSON
 - removal leaves no active `\Replicator\` task for the profile
