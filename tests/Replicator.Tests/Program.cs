@@ -34,6 +34,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("scheduled task action inspector flags visible powershell actions", ScheduledTaskActionInspectorFlagsVisiblePowerShellActions),
     ("scheduled task action inspector flags mismatched script paths", ScheduledTaskActionInspectorFlagsMismatchedScriptPaths),
     ("scheduled task query reports repair reasons", ScheduledTaskQueryReportsRepairReasons),
+    ("scheduled task inventory classifies matched repair and orphaned tasks", ScheduledTaskInventoryClassifiesMatchedRepairAndOrphanedTasks),
+    ("scheduled task inventory disables repair for running tasks", ScheduledTaskInventoryDisablesRepairForRunningTasks),
+    ("scheduled task inventory reports query failure as unknown", ScheduledTaskInventoryReportsQueryFailureAsUnknown),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
     ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes),
     ("validator rejects invalid minute interval", ValidatorRejectsInvalidMinuteInterval),
@@ -972,6 +975,104 @@ Task To Run:                          powershell.exe -NoProfile -ExecutionPolicy
             File.Delete(actualScript);
         }
     }
+}
+
+static async Task ScheduledTaskInventoryClassifiesMatchedRepairAndOrphanedTasks()
+{
+    var profile = ValidProfile();
+    var expectedScript = Path.Combine(Path.GetTempPath(), $"expected-{Guid.NewGuid():N}.ps1");
+    var orphanScript = Path.Combine(Path.GetTempPath(), $"orphan-{Guid.NewGuid():N}.ps1");
+    File.WriteAllText(orphanScript, "# orphan");
+
+    try
+    {
+        var output = $"""
+TaskName:                             {ScheduledTaskName.ForProfile(profile)}
+Next Run Time:                        5/21/2026 2:00:00 PM
+Status:                               Ready
+Last Run Time:                        5/21/2026 1:00:00 PM
+Last Result:                          0
+Task To Run:                          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{orphanScript}"
+
+TaskName:                             \Replicator\Legacy-Replicator-Task
+Next Run Time:                        5/21/2026 3:00:00 PM
+Status:                               Ready
+Last Run Time:                        5/21/2026 12:00:00 PM
+Last Result:                          0
+Task To Run:                          powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{orphanScript}"
+""";
+        var service = new WindowsScheduledTaskInventoryService(new FakeProcessRunner(new ProcessResult(0, output, string.Empty)));
+
+        var result = await service.ScanAsync([profile], new Dictionary<Guid, string> { [profile.Id] = expectedScript });
+
+        Assert(result.Summary.Total == 2, $"Expected two inventory rows, got {result.Summary.Total}.");
+        Assert(result.Summary.NeedsRepair == 1, $"Expected one repair row, got {result.Summary.NeedsRepair}.");
+        Assert(result.Summary.Orphaned == 1, $"Expected one orphan row, got {result.Summary.Orphaned}.");
+        Assert(result.Summary.HasIssues, "Expected summary to show issues.");
+
+        var matched = result.Items.Single(item => item.ProfileId == profile.Id);
+        Assert(matched.InventoryState == ScheduledTaskInventoryState.NeedsRepair, $"Unexpected matched state: {matched.InventoryState}.");
+        Assert(matched.CanRepair, "Expected matched unhealthy task to be repairable.");
+        Assert(matched.Reason.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase), $"Unexpected repair reason: {matched.Reason}");
+
+        var orphan = result.Items.Single(item => item.InventoryState == ScheduledTaskInventoryState.Orphaned);
+        Assert(orphan.ProfileId is null, "Expected orphan row to have no profile id.");
+        Assert(!orphan.CanRepair, "Orphaned tasks should not be repairable in this slice.");
+    }
+    finally
+    {
+        if (File.Exists(orphanScript))
+        {
+            File.Delete(orphanScript);
+        }
+    }
+}
+
+static async Task ScheduledTaskInventoryDisablesRepairForRunningTasks()
+{
+    var profile = ValidProfile();
+    var script = Path.Combine(Path.GetTempPath(), $"running-{Guid.NewGuid():N}.ps1");
+    File.WriteAllText(script, "# running");
+
+    try
+    {
+        var output = $"""
+TaskName:                             {ScheduledTaskName.ForProfile(profile)}
+Next Run Time:                        N/A
+Status:                               Running
+Last Run Time:                        5/21/2026 1:00:00 PM
+Last Result:                          267009
+Task To Run:                          powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{script}"
+""";
+        var service = new WindowsScheduledTaskInventoryService(new FakeProcessRunner(new ProcessResult(0, output, string.Empty)));
+
+        var result = await service.ScanAsync([profile], new Dictionary<Guid, string> { [profile.Id] = script });
+
+        var item = result.Items.Single();
+        Assert(item.InventoryState == ScheduledTaskInventoryState.Running, $"Unexpected state: {item.InventoryState}.");
+        Assert(!item.CanRepair, "Running tasks should not be repairable.");
+        Assert(result.Summary.Running == 1, $"Expected one running task, got {result.Summary.Running}.");
+    }
+    finally
+    {
+        if (File.Exists(script))
+        {
+            File.Delete(script);
+        }
+    }
+}
+
+static async Task ScheduledTaskInventoryReportsQueryFailureAsUnknown()
+{
+    var service = new WindowsScheduledTaskInventoryService(new FakeProcessRunner(new ProcessResult(1, string.Empty, "Access is denied.")));
+
+    var result = await service.ScanAsync([ValidProfile()], new Dictionary<Guid, string>());
+
+    Assert(result.Summary.Total == 1, $"Expected one unknown inventory row, got {result.Summary.Total}.");
+    Assert(result.Summary.Unknown == 1, $"Expected one unknown row, got {result.Summary.Unknown}.");
+    Assert(result.Summary.HasIssues, "Expected query failure to show an Action Center issue.");
+    Assert(result.Items[0].InventoryState == ScheduledTaskInventoryState.Unknown, $"Unexpected state: {result.Items[0].InventoryState}.");
+    Assert(result.Items[0].Reason.Contains("Access is denied", StringComparison.OrdinalIgnoreCase), $"Unexpected reason: {result.Items[0].Reason}");
 }
 
 static Task MinuteSchedulesEmitSchtasksMinuteCadence()
