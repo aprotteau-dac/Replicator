@@ -3,6 +3,7 @@ bin/
 obj/
 test-artifacts/
 artifacts/
+.superpowers/
 
 node_modules/
 *.user
