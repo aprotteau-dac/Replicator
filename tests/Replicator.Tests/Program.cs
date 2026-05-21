@@ -15,6 +15,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("script generator emits robocopy dry-run script", ScriptGeneratorEmitsDryRunScript),
     ("script generator emits target preflight status", ScriptGeneratorEmitsTargetPreflightStatus),
     ("log reader summarizes latest robocopy log", LogReaderSummarizesLatestRobocopyLog),
+    ("status reader parses latest backup status", StatusReaderParsesLatestBackupStatus),
+    ("status reader ignores malformed latest backup status", StatusReaderIgnoresMalformedLatestBackupStatus),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
     ("shuttle source enumeration prunes excluded directories", ShuttleSourceEnumerationPrunesExcludedDirectories),
@@ -162,6 +164,86 @@ static Task LogReaderSummarizesLatestRobocopyLog()
         Assert(summary.CopiedFiles == 73, "Expected copied/listed file count.");
         Assert(summary.FailedFiles == 0, "Expected failed file count.");
         Assert(summary.TotalDirectories == 42, "Expected total directory count.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task StatusReaderParsesLatestBackupStatus()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var logsDirectory = Path.Combine(root, "logs");
+    Directory.CreateDirectory(logsDirectory);
+
+    try
+    {
+        var profile = ValidProfile();
+        var slug = PowerShellScriptGenerator.ProfileSlug(profile);
+        var statusPath = Path.Combine(logsDirectory, $"{slug}-latest.json");
+        File.WriteAllText(statusPath, """
+{
+  "ProfileName": "Scratch",
+  "Mode": "DryRun",
+  "Source": "D:\\repos\\work",
+  "Destination": "H:\\dev\\work",
+  "LogPath": "C:\\Users\\aprotteau\\AppData\\Local\\Replicator\\logs\\scratch.log",
+  "StartedAt": "2026-05-21T20:00:00.0000000Z",
+  "UpdatedAt": "2026-05-21T20:00:01.0000000Z",
+  "ExitCode": 0,
+  "Succeeded": true,
+  "Message": "Target path does not exist; dry run would create it during a real run: H:\\dev\\work"
+}
+""");
+        var reader = new BackupRunStatusReader(logsDirectory);
+
+        var status = reader.ReadLatest(profile);
+
+        if (status is null)
+        {
+            throw new InvalidOperationException("Expected latest status to be parsed.");
+        }
+
+        Assert(status.ProfileName == "Scratch", $"Unexpected profile name: {status.ProfileName}");
+        Assert(status.Mode == "DryRun", $"Unexpected mode: {status.Mode}");
+        Assert(status.ExitCode == 0, $"Unexpected exit code: {status.ExitCode}");
+        Assert(status.Succeeded, "Expected status success.");
+        Assert(status.Message.Contains("dry run would create", StringComparison.OrdinalIgnoreCase), $"Unexpected message: {status.Message}");
+        Assert(status.ToDisplayString().Contains("DryRun", StringComparison.Ordinal), "Expected display string to include mode.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task StatusReaderIgnoresMalformedLatestBackupStatus()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var logsDirectory = Path.Combine(root, "logs");
+    Directory.CreateDirectory(logsDirectory);
+
+    try
+    {
+        var profile = ValidProfile();
+        var slug = PowerShellScriptGenerator.ProfileSlug(profile);
+        File.WriteAllText(Path.Combine(logsDirectory, $"{slug}-latest.json"), "{ not json");
+        var reader = new BackupRunStatusReader(logsDirectory);
+
+        var status = reader.ReadLatest(profile);
+
+        Assert(status is null, "Expected malformed status to be ignored.");
     }
     finally
     {

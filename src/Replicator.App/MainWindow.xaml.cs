@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private readonly ProfileDriveSecurityChecker _driveSecurityChecker;
     private readonly PowerShellScriptGenerator _scriptGenerator;
     private readonly BackupLogReader _logReader;
+    private readonly BackupRunStatusReader _runStatusReader;
     private readonly ShuttleService _shuttleService;
     private readonly ProcessRunner _processRunner;
     private readonly IScheduledTaskService _scheduledTasks;
@@ -45,6 +46,7 @@ public partial class MainWindow : Window
         _driveSecurityChecker = new ProfileDriveSecurityChecker(new PowerShellBitLockerStatusProvider(_processRunner));
         _scriptGenerator = new PowerShellScriptGenerator(_paths.ScriptsDirectory, _paths.LogsDirectory);
         _logReader = new BackupLogReader(_paths.LogsDirectory);
+        _runStatusReader = new BackupRunStatusReader(_paths.LogsDirectory);
         _shuttleService = new ShuttleService(new MachineIdentityProvider(_paths.MachineIdentityFile).GetOrCreate());
         _scheduledTasks = new WindowsScheduledTaskService(_processRunner);
 
@@ -470,15 +472,28 @@ public partial class MainWindow : Window
 
     private void ShowLatestRun(BackupProfile profile)
     {
+        var status = _runStatusReader.ReadLatest(profile);
         var summary = _logReader.ReadLatest(profile);
-        if (summary is null)
+        if (status is null && summary is null)
         {
             LatestLogTextBlock.Text = "No log has been written for this profile.";
             RunSummaryTextBlock.Text = "";
+            OutputTextBox.Text = "";
             return;
         }
 
-        LatestLogTextBlock.Text = summary.LogPath;
+        if (status is not null)
+        {
+            LatestLogTextBlock.Text = string.IsNullOrWhiteSpace(status.LogPath)
+                ? "No log path was written for the latest run."
+                : status.LogPath;
+            RunSummaryTextBlock.Text = status.ToDisplayString();
+            OutputTextBox.Text = summary?.Tail ?? status.Message;
+            OutputTextBox.ScrollToEnd();
+            return;
+        }
+
+        LatestLogTextBlock.Text = summary!.LogPath;
         RunSummaryTextBlock.Text = summary.ToDisplayString();
         OutputTextBox.Text = summary.Tail;
         OutputTextBox.ScrollToEnd();
