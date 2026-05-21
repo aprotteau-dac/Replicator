@@ -172,7 +172,14 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
                     throw "Source path is unavailable: $Source"
                 }
 
-                if (-not $effectiveDryRun) {
+                if (-not (Test-Path -LiteralPath $Destination -PathType Container)) {
+                    if ($effectiveDryRun) {
+                        $message = "Target path does not exist; dry run would create it during a real run: $Destination"
+                        Write-RunLog $message
+                        Write-Status -Message $message -ExitCode 0 -Succeeded $true
+                        exit 0
+                    }
+
                     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
                 }
 

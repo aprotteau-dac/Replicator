@@ -13,6 +13,7 @@ var tests = new List<(string Name, Func<Task> Test)>
 {
     ("validator rejects destinations under the source tree", ValidatorRejectsNestedDestination),
     ("script generator emits robocopy dry-run script", ScriptGeneratorEmitsDryRunScript),
+    ("script generator emits target preflight status", ScriptGeneratorEmitsTargetPreflightStatus),
     ("log reader summarizes latest robocopy log", LogReaderSummarizesLatestRobocopyLog),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
@@ -101,6 +102,23 @@ static Task ScriptGeneratorEmitsDryRunScript()
     Assert(script.Content.Contains("$DryRunFromProfile = $true", StringComparison.Ordinal), "Expected profile dry-run flag.");
     Assert(script.Content.Contains("'node_modules'", StringComparison.Ordinal), "Expected node_modules exclude.");
     Assert(script.Content.Contains("'bin'", StringComparison.Ordinal), "Expected bin exclude.");
+
+    return Task.CompletedTask;
+}
+
+static Task ScriptGeneratorEmitsTargetPreflightStatus()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var generator = new PowerShellScriptGenerator(Path.Combine(root, "scripts"), Path.Combine(root, "logs"));
+
+    var script = generator.Generate(ValidProfile());
+
+    Assert(script.Content.Contains("Target path does not exist; dry run would create it during a real run:", StringComparison.Ordinal), "Expected dry-run target-path message.");
+    Assert(script.Content.Contains("Write-Status -Message $message -ExitCode 0 -Succeeded $true", StringComparison.Ordinal), "Expected dry-run target status write.");
+    Assert(
+        script.Content.IndexOf("Target path does not exist; dry run would create it during a real run:", StringComparison.Ordinal)
+            < script.Content.IndexOf("& robocopy", StringComparison.OrdinalIgnoreCase),
+        "Expected target preflight before robocopy.");
 
     return Task.CompletedTask;
 }
