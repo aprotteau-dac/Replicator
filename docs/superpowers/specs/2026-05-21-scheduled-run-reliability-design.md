@@ -45,7 +45,7 @@ The health check should classify the selected profile task as needing repair whe
 - the action points to a missing script path
 - the action points to a script path that does not match the expected generated script path for the selected profile
 
-The UI should surface this as `Needs repair` and keep `Update Task` available. The repair path is the existing install/update flow: save profile, regenerate script, and call `InstallOrUpdateAsync`.
+The UI should surface this as `Needs repair` and show `Repair Task`. The repair path is the existing install/update flow: save profile, regenerate script, and call `InstallOrUpdateAsync`.
 
 ### 2. Script Preflight And Status Logging
 
@@ -78,7 +78,7 @@ The selected-profile UI should show latest status evidence alongside the existin
 
 ## UX Behavior
 
-When a selected profile has a scheduled task with a stale visible action, the header should not merely show `Ready`. It should show that the task needs repair, and the output/status area should explain why. The primary action remains `Update Task`, because that is already the safe way to regenerate the script and task definition.
+When a selected profile has a scheduled task with a stale visible action, the header should not merely show `Ready`. It should show that the task needs repair, and the output/status area should explain why. The primary action should read `Repair Task` while using the same safe update path that regenerates the script and task definition.
 
 When a scheduled task runs and the target drive is missing, no PowerShell or robocopy window should appear. The app should later show a failed latest run with a message such as `Target drive is unavailable: H:\` and a path to the log/status evidence.
 
@@ -93,4 +93,4 @@ When a scheduled task runs and the target drive is missing, no PowerShell or rob
 
 ## Rollout Notes
 
-After this is implemented, existing users with stale scheduled tasks should click `Refresh Status`, see a repair warning, and click `Update Task`. A later intake/reconciliation flow can scan all `\Replicator\` tasks and list orphaned tasks, but this slice fixes the selected-profile path first because that is where the visible scheduled-run window is being encountered.
+After this is implemented, existing users with stale scheduled tasks should click `Refresh Status`, see a repair warning, and click `Repair Task`. A later intake/reconciliation flow can scan all `\Replicator\` tasks and list orphaned tasks, but this slice fixes the selected-profile path first because that is where the visible scheduled-run window is being encountered.

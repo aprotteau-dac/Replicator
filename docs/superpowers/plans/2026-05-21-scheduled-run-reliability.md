@@ -4,7 +4,7 @@
 
 **Goal:** Make selected-profile scheduled runs headless, repairable, and diagnosable when old Task Scheduler actions, unavailable targets, or dry-run status files are involved.
 
-**Architecture:** Add a small scheduled-task action inspector in Core, extend the selected-profile task snapshot with repair health, and keep the WPF app using the existing "Update Task" path as the repair action. Extend generated PowerShell scripts to write clear preflight status before robocopy and add a status reader that reads the existing `*-latest.json` files beside robocopy logs.
+**Architecture:** Add a small scheduled-task action inspector in Core, extend the selected-profile task snapshot with repair health, and label the existing WPF update path as "Repair Task" when a task is stale. Extend generated PowerShell scripts to write clear preflight status before robocopy and add a status reader that reads the existing `*-latest.json` files beside robocopy logs.
 
 **Tech Stack:** .NET 8 WPF, `schtasks.exe`, generated PowerShell scripts, JSON status files, repository smoke-test harness in `tests/Replicator.Tests`.
 
@@ -509,22 +509,17 @@ Add this test method:
 ```csharp
 static Task ScriptGeneratorEmitsTargetPreflightStatus()
 {
-    var root = CreateTempDirectory();
-    try
-    {
-        var generator = new PowerShellScriptGenerator(Path.Combine(root, "scripts"), Path.Combine(root, "logs"));
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var generator = new PowerShellScriptGenerator(Path.Combine(root, "scripts"), Path.Combine(root, "logs"));
 
-        var script = generator.Generate(ValidProfile());
+    var script = generator.Generate(ValidProfile());
 
-        Assert(script.Content.Contains("Target path does not exist; dry run would create it during a real run:", StringComparison.Ordinal), "Expected dry-run target-path message.");
-        Assert(script.Content.Contains("Write-Status -Message $message -ExitCode 0 -Succeeded $true", StringComparison.Ordinal), "Expected dry-run target status write.");
-        Assert(script.Content.IndexOf("Target path does not exist; dry run would create it during a real run:", StringComparison.Ordinal)
-            < script.Content.IndexOf("& robocopy", StringComparison.OrdinalIgnoreCase), "Expected target preflight before robocopy.");
-    }
-    finally
-    {
-        Directory.Delete(root, recursive: true);
-    }
+    Assert(script.Content.Contains("Target path does not exist; dry run would create it during a real run:", StringComparison.Ordinal), "Expected dry-run target-path message.");
+    Assert(script.Content.Contains("Write-Status -Message $message -ExitCode 0 -Succeeded $true", StringComparison.Ordinal), "Expected dry-run target status write.");
+    Assert(
+        script.Content.IndexOf("Target path does not exist; dry run would create it during a real run:", StringComparison.Ordinal)
+            < script.Content.IndexOf("& robocopy", StringComparison.OrdinalIgnoreCase),
+        "Expected target preflight before robocopy.");
 
     return Task.CompletedTask;
 }
@@ -608,17 +603,22 @@ Add these test methods:
 ```csharp
 static Task StatusReaderParsesLatestBackupStatus()
 {
-    var root = CreateTempDirectory();
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var logsDirectory = Path.Combine(root, "logs");
+    Directory.CreateDirectory(logsDirectory);
+
     try
     {
-        var statusPath = Path.Combine(root, "work-directory-shuttle-latest.json");
+        var profile = ValidProfile();
+        var slug = PowerShellScriptGenerator.ProfileSlug(profile);
+        var statusPath = Path.Combine(logsDirectory, $"{slug}-latest.json");
         File.WriteAllText(statusPath, """
 {
-  "ProfileName": "Work Directory Shuttle",
+  "ProfileName": "Scratch",
   "Mode": "DryRun",
   "Source": "D:\\repos\\work",
   "Destination": "H:\\dev\\work",
-  "LogPath": "C:\\Users\\aprotteau\\AppData\\Local\\Replicator\\logs\\work-directory-shuttle.log",
+  "LogPath": "C:\\Users\\aprotteau\\AppData\\Local\\Replicator\\logs\\scratch.log",
   "StartedAt": "2026-05-21T20:00:00.0000000Z",
   "UpdatedAt": "2026-05-21T20:00:01.0000000Z",
   "ExitCode": 0,
@@ -626,12 +626,16 @@ static Task StatusReaderParsesLatestBackupStatus()
   "Message": "Target path does not exist; dry run would create it during a real run: H:\\dev\\work"
 }
 """);
-        var reader = new BackupRunStatusReader(root);
+        var reader = new BackupRunStatusReader(logsDirectory);
 
-        var status = reader.ReadLatest(ValidProfile());
+        var status = reader.ReadLatest(profile);
 
-        Assert(status is not null, "Expected latest status to be parsed.");
-        Assert(status.ProfileName == "Work Directory Shuttle", $"Unexpected profile name: {status.ProfileName}");
+        if (status is null)
+        {
+            throw new InvalidOperationException("Expected latest status to be parsed.");
+        }
+
+        Assert(status.ProfileName == "Scratch", $"Unexpected profile name: {status.ProfileName}");
         Assert(status.Mode == "DryRun", $"Unexpected mode: {status.Mode}");
         Assert(status.ExitCode == 0, $"Unexpected exit code: {status.ExitCode}");
         Assert(status.Succeeded, "Expected status success.");
@@ -640,7 +644,10 @@ static Task StatusReaderParsesLatestBackupStatus()
     }
     finally
     {
-        Directory.Delete(root, recursive: true);
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     return Task.CompletedTask;
@@ -648,19 +655,27 @@ static Task StatusReaderParsesLatestBackupStatus()
 
 static Task StatusReaderIgnoresMalformedLatestBackupStatus()
 {
-    var root = CreateTempDirectory();
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var logsDirectory = Path.Combine(root, "logs");
+    Directory.CreateDirectory(logsDirectory);
+
     try
     {
-        File.WriteAllText(Path.Combine(root, "work-directory-shuttle-latest.json"), "{ not json");
-        var reader = new BackupRunStatusReader(root);
+        var profile = ValidProfile();
+        var slug = PowerShellScriptGenerator.ProfileSlug(profile);
+        File.WriteAllText(Path.Combine(logsDirectory, $"{slug}-latest.json"), "{ not json");
+        var reader = new BackupRunStatusReader(logsDirectory);
 
-        var status = reader.ReadLatest(ValidProfile());
+        var status = reader.ReadLatest(profile);
 
         Assert(status is null, "Expected malformed status to be ignored.");
     }
     finally
     {
-        Directory.Delete(root, recursive: true);
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     return Task.CompletedTask;

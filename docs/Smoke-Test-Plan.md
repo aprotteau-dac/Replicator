@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-27 test(s) passed.
+33 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -32,7 +32,10 @@ This gate covers:
 - shuttle environment-variable source path expansion
 - scheduled task naming
 - hidden non-interactive scheduled task PowerShell action
+- scheduled task action repair detection for visible or stale PowerShell actions
 - minute schedule command generation and validation
+- generated backup script target preflight before robocopy
+- latest scheduled-run JSON status parsing
 - default development excludes
 - shuttle source enumeration prunes excluded directories before recursion
 - availability checks for missing source, creatable target, and unavailable drive
@@ -120,8 +123,9 @@ Pass criteria:
 Pass criteria:
 
 - task action buttons are conditional to the installed/enabled/disabled state
+- stale visible or mismatched task actions show `Repair Task` and cannot be started until repaired
 - minute cadence installs successfully through Task Scheduler
-- on-demand scheduled task execution writes a log
+- on-demand scheduled task execution writes a log and latest status JSON
 - removal leaves no active `\Replicator\` task for the profile
 
 ## Shuttle Smoke
@@ -210,6 +214,7 @@ Stop the smoke pass and open a [GitHub bug](Bug-Tracking.md) if any of these occ
 - app hangs for more than 30 seconds after canceling a shuttle operation
 - backup or shuttle writes to an unexpected path
 - scheduled task action buttons contradict the task state
+- scheduled task execution opens a visible PowerShell or robocopy window
 - unavailable source or target starts a copy anyway
 - BitLocker command failure crashes the app instead of reporting unavailable, permission-required, or unknown posture
 - conflict receive overwrites local content without preserving a conflict copy
