@@ -15,10 +15,16 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
         }
 
         var slug = ProfileSlug(profile);
-        var scriptPath = Path.Combine(scriptsDirectory, $"{slug}.ps1");
+        var scriptPath = ScriptPathFor(profile);
         var content = BuildScript(profile, slug);
 
         return new GeneratedScript(scriptPath, content);
+    }
+
+    public string ScriptPathFor(BackupProfile profile)
+    {
+        var slug = ProfileSlug(profile);
+        return Path.Combine(scriptsDirectory, $"{slug}.ps1");
     }
 
     public async Task<GeneratedScript> WriteAsync(BackupProfile profile, CancellationToken cancellationToken = default)

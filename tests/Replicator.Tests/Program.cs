@@ -30,6 +30,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("scheduled task action runs hidden noninteractive powershell", ScheduledTaskActionRunsHiddenNonInteractivePowerShell),
     ("scheduled task action inspector flags visible powershell actions", ScheduledTaskActionInspectorFlagsVisiblePowerShellActions),
     ("scheduled task action inspector flags mismatched script paths", ScheduledTaskActionInspectorFlagsMismatchedScriptPaths),
+    ("scheduled task query reports repair reasons", ScheduledTaskQueryReportsRepairReasons),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
     ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes),
     ("validator rejects invalid minute interval", ValidatorRejectsInvalidMinuteInterval),
@@ -829,6 +830,48 @@ static Task ScheduledTaskActionInspectorFlagsMismatchedScriptPaths()
     }
 
     return Task.CompletedTask;
+}
+
+static async Task ScheduledTaskQueryReportsRepairReasons()
+{
+    var expectedScript = Path.Combine(Path.GetTempPath(), $"expected-{Guid.NewGuid():N}.ps1");
+    var actualScript = Path.Combine(Path.GetTempPath(), $"actual-{Guid.NewGuid():N}.ps1");
+    File.WriteAllText(actualScript, "# test");
+
+    try
+    {
+        var output = $"""
+
+Folder: \Replicator
+HostName:                             DEVBOX
+TaskName:                             \Replicator\Back-up-Personal-Dev-58baefdb
+Next Run Time:                        5/21/2026 2:00:00 PM
+Status:                               Ready
+Logon Mode:                           Interactive/Background
+Last Run Time:                        5/21/2026 1:00:00 PM
+Last Result:                          0
+Task To Run:                          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{actualScript}"
+
+""";
+        var service = new WindowsScheduledTaskService(new FakeProcessRunner(new ProcessResult(0, output, string.Empty)));
+
+        var snapshot = await service.QueryAsync(ValidProfile(), expectedScript);
+
+        Assert(snapshot.NeedsRepair, "Expected visible or mismatched action to need repair.");
+        Assert(snapshot.TaskToRun.Contains(actualScript, StringComparison.OrdinalIgnoreCase), "Expected raw task action to be captured.");
+        Assert(snapshot.ScriptPath == actualScript, $"Unexpected script path: {snapshot.ScriptPath}");
+        Assert(snapshot.ScriptExists, "Expected parsed task script to exist.");
+        Assert(snapshot.RepairReasons.Any(reason => reason.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase)), "Expected missing hidden-window repair reason.");
+        Assert(snapshot.RepairReasons.Any(reason => reason.Contains("-NonInteractive", StringComparison.OrdinalIgnoreCase)), "Expected missing noninteractive repair reason.");
+        Assert(snapshot.RepairReasons.Any(reason => reason.Contains("does not match", StringComparison.OrdinalIgnoreCase)), "Expected script path mismatch reason.");
+    }
+    finally
+    {
+        if (File.Exists(actualScript))
+        {
+            File.Delete(actualScript);
+        }
+    }
 }
 
 static Task MinuteSchedulesEmitSchtasksMinuteCadence()

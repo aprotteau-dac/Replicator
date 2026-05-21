@@ -238,11 +238,19 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var snapshot = await _scheduledTasks.QueryAsync(profile);
+            var expectedScriptPath = _scriptGenerator.ScriptPathFor(profile);
+            var snapshot = await _scheduledTasks.QueryAsync(profile, expectedScriptPath);
             if (snapshot.State == ScheduledTaskState.Missing)
             {
                 ShowStatus("No scheduled task is installed for this profile. Use Install Task or Run Now.", false);
                 AppendOutput(snapshot.RawOutput);
+                return;
+            }
+
+            if (snapshot.NeedsRepair)
+            {
+                ShowStatus("Scheduled task needs repair before it can be started. Use Repair Task.", false);
+                AppendOutput(string.Join(Environment.NewLine, snapshot.RepairReasons));
                 return;
             }
 
@@ -381,14 +389,17 @@ public partial class MainWindow : Window
 
     private async Task RefreshTaskStatusAsync(BackupProfile profile)
     {
-        var snapshot = await _scheduledTasks.QueryAsync(profile);
+        var expectedScriptPath = _scriptGenerator.ScriptPathFor(profile);
+        var snapshot = await _scheduledTasks.QueryAsync(profile, expectedScriptPath);
         _currentTaskSnapshot = snapshot;
         TaskNameTextBlock.Text = snapshot.TaskName;
         NextRunTextBlock.Text = string.IsNullOrWhiteSpace(snapshot.NextRunTime) ? snapshot.State.ToString() : snapshot.NextRunTime;
         LastRunTextBlock.Text = string.IsNullOrWhiteSpace(snapshot.LastRunTime)
             ? $"Last result: {snapshot.LastResult}"
             : $"{snapshot.LastRunTime}; result {snapshot.LastResult}";
-        TaskSummaryTextBlock.Text = $"{snapshot.State} | {profile.Engine} | {profile.Target.Kind}";
+        TaskSummaryTextBlock.Text = snapshot.NeedsRepair
+            ? $"Needs repair | {string.Join(" ", snapshot.RepairReasons)}"
+            : $"{snapshot.State} | {profile.Engine} | {profile.Target.Kind}";
         ApplyTaskStatusBrushes(snapshot);
         UpdateActionSurface(profile, snapshot);
     }
@@ -439,9 +450,12 @@ public partial class MainWindow : Window
         for (var attempt = 0; attempt < 30; attempt++)
         {
             await Task.Delay(500);
-            var snapshot = await _scheduledTasks.QueryAsync(profile);
+            var expectedScriptPath = _scriptGenerator.ScriptPathFor(profile);
+            var snapshot = await _scheduledTasks.QueryAsync(profile, expectedScriptPath);
             _currentTaskSnapshot = snapshot;
-            TaskSummaryTextBlock.Text = $"{snapshot.State} | {profile.Engine} | {profile.Target.Kind}";
+            TaskSummaryTextBlock.Text = snapshot.NeedsRepair
+                ? $"Needs repair | {string.Join(" ", snapshot.RepairReasons)}"
+                : $"{snapshot.State} | {profile.Engine} | {profile.Target.Kind}";
             ApplyTaskStatusBrushes(snapshot);
             UpdateActionSurface(profile, snapshot);
 
@@ -723,7 +737,7 @@ public partial class MainWindow : Window
     {
         var secondaryBrush = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
         var alarmBrush = (System.Windows.Media.Brush)FindResource("Brush.Status.Alarm");
-        var stateBrush = snapshot.State == ScheduledTaskState.Missing ? alarmBrush : secondaryBrush;
+        var stateBrush = snapshot.State == ScheduledTaskState.Missing || snapshot.NeedsRepair ? alarmBrush : secondaryBrush;
 
         NextRunTextBlock.Foreground = stateBrush;
         TaskSummaryTextBlock.Foreground = stateBrush;
@@ -833,15 +847,16 @@ public partial class MainWindow : Window
 
         var supportsScheduledTask = isBackupProfile && profile!.Schedule.Cadence != ScheduleCadence.Manual;
         var taskState = snapshot?.State ?? ScheduledTaskState.Missing;
+        var taskNeedsRepair = snapshot?.NeedsRepair == true;
         var taskExists = supportsScheduledTask && taskState != ScheduledTaskState.Missing;
         var taskRunning = taskState == ScheduledTaskState.Running;
         var taskDisabled = taskState == ScheduledTaskState.Disabled;
-        var taskCanStart = taskState is ScheduledTaskState.Ready or ScheduledTaskState.Unknown;
+        var taskCanStart = taskExists && !taskNeedsRepair && (taskState is ScheduledTaskState.Ready or ScheduledTaskState.Unknown);
 
         SetButton(InstallTaskButton, supportsScheduledTask && !taskRunning, enabledWhenIdle: true);
-        InstallTaskButton.Content = taskExists ? "Update Task" : "Install Task";
+        InstallTaskButton.Content = taskNeedsRepair ? "Repair Task" : taskExists ? "Update Task" : "Install Task";
 
-        SetButton(StartScheduledTaskButton, taskExists && taskCanStart, enabledWhenIdle: true);
+        SetButton(StartScheduledTaskButton, taskCanStart, enabledWhenIdle: true);
         SetButton(EnableTaskButton, taskExists && taskDisabled, enabledWhenIdle: true);
         SetButton(DisableTaskButton, taskExists && taskState == ScheduledTaskState.Ready, enabledWhenIdle: true);
         SetButton(RemoveTaskButton, taskExists && !taskRunning, enabledWhenIdle: true);

@@ -17,5 +17,8 @@ public interface IScheduledTaskService
 
     Task<TaskOperationResult> DeleteAsync(BackupProfile profile, CancellationToken cancellationToken = default);
 
-    Task<ScheduledTaskSnapshot> QueryAsync(BackupProfile profile, CancellationToken cancellationToken = default);
+    Task<ScheduledTaskSnapshot> QueryAsync(
+        BackupProfile profile,
+        string? expectedScriptPath = null,
+        CancellationToken cancellationToken = default);
 }

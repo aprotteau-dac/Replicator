@@ -72,7 +72,10 @@ public sealed class WindowsScheduledTaskService(IProcessRunner processRunner) : 
         return ToOperationResult("delete", result, ScheduledTaskName.ForProfile(profile));
     }
 
-    public async Task<ScheduledTaskSnapshot> QueryAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    public async Task<ScheduledTaskSnapshot> QueryAsync(
+        BackupProfile profile,
+        string? expectedScriptPath = null,
+        CancellationToken cancellationToken = default)
     {
         var taskName = ScheduledTaskName.ForProfile(profile);
         var result = await processRunner.RunAsync(
@@ -90,6 +93,8 @@ public sealed class WindowsScheduledTaskService(IProcessRunner processRunner) : 
         var lastResult = int.TryParse(values.GetValueOrDefault("Last Result"), out var parsedLastResult)
             ? parsedLastResult
             : 0;
+        var taskToRun = values.GetValueOrDefault("Task To Run") ?? string.Empty;
+        var actionHealth = ScheduledTaskActionInspector.Inspect(taskToRun, expectedScriptPath);
 
         return new ScheduledTaskSnapshot(
             taskName,
@@ -97,7 +102,14 @@ public sealed class WindowsScheduledTaskService(IProcessRunner processRunner) : 
             values.GetValueOrDefault("Next Run Time") ?? "",
             values.GetValueOrDefault("Last Run Time") ?? "",
             lastResult,
-            result.StandardOutput);
+            result.StandardOutput)
+        {
+            TaskToRun = taskToRun,
+            ScriptPath = actionHealth.ScriptPath,
+            ScriptExists = actionHealth.ScriptExists,
+            NeedsRepair = actionHealth.NeedsRepair,
+            RepairReasons = actionHealth.RepairReasons
+        };
     }
 
     private static IReadOnlyList<string> BuildCreateArguments(BackupProfile profile, string scriptPath, string taskName)
@@ -151,7 +163,7 @@ public sealed class WindowsScheduledTaskService(IProcessRunner processRunner) : 
     private static Dictionary<string, string> ParseListOutput(string output)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var line in output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var line in output.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries))
         {
             var index = line.IndexOf(':');
             if (index <= 0)
