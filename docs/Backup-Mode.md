@@ -29,7 +29,7 @@ Scheduled task scripts run through hidden, non-interactive PowerShell actions. O
 
 Scheduled scripts also check the source and target roots before copying. If an external drive is unplugged or a source path is missing, the task fails cleanly, writes the error to the run log/status file, and retries naturally on the next scheduled cadence. If a dry run sees that the target path does not exist, it writes a clear latest status saying the real run would create the path and exits before robocopy.
 
-Each run writes a timestamped robocopy log plus a per-profile `*-latest.json` status file under `%LOCALAPPDATA%\Replicator\logs`. The app shows the latest status first, then falls back to robocopy log parsing when no status JSON is available.
+Each run writes a timestamped robocopy log plus a per-profile `*-latest.json` status file under `%LOCALAPPDATA%\Replicator\logs`. The app shows the latest status first, then falls back to robocopy log parsing when no status JSON is available. If the newest robocopy log is still locked by an active scheduled run, Replicator skips it and reads the newest available previous log rather than surfacing a raw file-lock exception in the UI.
 
 Supported task cadences are manual, minutes, hourly, daily, and weekly. Minute schedules use Windows Task Scheduler's minute cadence with the configured minute interval.
 

@@ -6,7 +6,7 @@ The likely implementation path is a BitLocker wrapper rather than custom encrypt
 
 ## Current Implementation
 
-Replicator performs a visibility-only BitLocker posture check for local Windows drive roots used by a profile. The app runs this check from the normal user session; it does not require Replicator itself to be launched as administrator.
+Replicator performs a visibility-only BitLocker posture check for local Windows drive roots used by all loaded profiles. The app runs the first pass from the normal user session; it does not require Replicator itself to be launched as administrator.
 
 The app checks:
 
@@ -23,9 +23,13 @@ The header can show:
 - permission required for BitLocker verification
 - unknown
 
-If Windows denies the BitLocker status query, Replicator reports a permission-required warning instead of showing raw PowerShell/CIM error text. Backups and shuttle actions are not blocked by this warning because drive security is still visibility-only.
+Drive posture is cached by drive root for the current app session. Switching between profiles reuses the same checked source, backup target, and shuttle-drive results instead of prompting or re-querying the same drive repeatedly.
 
-Administrator elevation should remain a narrow verification action, not an app-wide requirement. A later elevated verification command can reuse the same drive-security state model without changing normal profile editing, backup, or shuttle flows.
+If Windows denies the standard BitLocker status query, Replicator reports a permission-required warning instead of showing raw PowerShell/CIM error text. Backups and shuttle actions are not blocked by this warning because drive security is still visibility-only.
+
+Administrator elevation remains a narrow verification action, not an app-wide requirement. When the header shows permission-required drive security, `Check All as Admin` performs one elevated verification pass for all profile-attached local drive roots and updates the shared cache. This avoids re-verifying each profile independently.
+
+Current limitation: the elevated check still uses an elevated PowerShell helper, so the UAC prompt is branded as PowerShell. A branded Replicator-owned elevated helper executable is planned so the prompt can show Replicator identity instead of generic PowerShell.
 
 This is not yet an enforcement control. Replicator warns about unprotected, permission-limited, or unknown drives, but it does not block backup or shuttle writes yet.
 

@@ -21,7 +21,9 @@ public partial class MainWindow : Window
     private readonly ReplicatorPaths _paths;
     private readonly IProfileStore _profileStore;
     private readonly ProfileAvailabilityChecker _availabilityChecker;
-    private readonly ProfileDriveSecurityChecker _driveSecurityChecker;
+    private readonly IBitLockerStatusProvider _driveSecurityProvider;
+    private readonly IBitLockerStatusProvider _elevatedDriveSecurityProvider;
+    private readonly ProfileDriveSecurityCache _driveSecurityCache;
     private readonly PowerShellScriptGenerator _scriptGenerator;
     private readonly BackupLogReader _logReader;
     private readonly BackupRunStatusReader _runStatusReader;
@@ -35,6 +37,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _currentOperationCancellationSource;
     private bool _isBusy;
     private bool _loadingProfile;
+    private bool _driveSecurityRequiresElevation;
 
     public MainWindow()
     {
@@ -45,7 +48,9 @@ public partial class MainWindow : Window
         _profileStore = new JsonProfileStore(_paths.ProfilesFile);
         _availabilityChecker = new ProfileAvailabilityChecker();
         _processRunner = new ProcessRunner();
-        _driveSecurityChecker = new ProfileDriveSecurityChecker(new PowerShellBitLockerStatusProvider(_processRunner));
+        _driveSecurityProvider = new PowerShellBitLockerStatusProvider(_processRunner);
+        _elevatedDriveSecurityProvider = new ElevatedPowerShellBitLockerStatusProvider(new ElevatedProcessRunner());
+        _driveSecurityCache = new ProfileDriveSecurityCache();
         _scriptGenerator = new PowerShellScriptGenerator(_paths.ScriptsDirectory, _paths.LogsDirectory);
         _logReader = new BackupLogReader(_paths.LogsDirectory);
         _runStatusReader = new BackupRunStatusReader(_paths.LogsDirectory);
@@ -315,6 +320,19 @@ public partial class MainWindow : Window
             ShowLatestRun(profile);
             await RefreshTaskInventoryAsync();
         }
+    }
+
+    private async void CheckDriveSecurityAsAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        await RunBusyAsync("Checking drive security as administrator...", async cancellationToken =>
+        {
+            if (!TryApplyForm(out var profile))
+            {
+                return;
+            }
+
+            await RefreshDriveSecurityAsAdminAsync(profile, cancellationToken);
+        }, canCancel: false);
     }
 
     private async void ReviewTaskInventory_Click(object sender, RoutedEventArgs e)
@@ -640,6 +658,8 @@ public partial class MainWindow : Window
                 TaskSummaryTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
                 AvailabilityTextBlock.Text = "Availability not checked.";
                 DriveSecurityTextBlock.Text = "Drive security not checked.";
+                _driveSecurityRequiresElevation = false;
+                UpdateDriveSecurityElevationButton();
                 _currentTaskSnapshot = null;
                 UpdateActionSurface(null, null);
                 return;
@@ -670,6 +690,8 @@ public partial class MainWindow : Window
             ShowLatestRun(profile);
             ShowAvailability(_availabilityChecker.Check(profile));
             DriveSecurityTextBlock.Text = "Drive security not checked.";
+            _driveSecurityRequiresElevation = false;
+            UpdateDriveSecurityElevationButton();
             UpdateActionSurface(profile, _currentTaskSnapshot);
         }
         finally
@@ -840,19 +862,51 @@ public partial class MainWindow : Window
 
     private async Task RefreshDriveSecurityAsync(BackupProfile profile)
     {
+        await RefreshDriveSecurityCacheAsync(
+            profile,
+            _driveSecurityProvider,
+            "Drive security: checking...");
+    }
+
+    private async Task RefreshDriveSecurityAsAdminAsync(BackupProfile profile, CancellationToken cancellationToken)
+    {
+        await RefreshDriveSecurityCacheAsync(
+            profile,
+            _elevatedDriveSecurityProvider,
+            "Drive security: waiting for administrator approval...",
+            refreshAll: true,
+            cancellationToken);
+    }
+
+    private async Task RefreshDriveSecurityCacheAsync(
+        BackupProfile profile,
+        IBitLockerStatusProvider provider,
+        string checkingMessage,
+        bool refreshAll = false,
+        CancellationToken cancellationToken = default)
+    {
         var profileId = profile.Id;
-        DriveSecurityTextBlock.Text = "Drive security: checking...";
+        DriveSecurityTextBlock.Text = checkingMessage;
         DriveSecurityTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
 
         try
         {
-            var report = await _driveSecurityChecker.CheckAsync(profile);
+            var profiles = _profiles.ToList();
+            if (refreshAll)
+            {
+                await _driveSecurityCache.RefreshAsync(profiles, provider, cancellationToken);
+            }
+            else
+            {
+                await _driveSecurityCache.WarmMissingAsync(profiles, provider, cancellationToken);
+            }
+
             if (GetSelectedProfile(showStatus: false)?.Id != profileId)
             {
                 return;
             }
 
-            ShowDriveSecurity(report);
+            ShowDriveSecurity(_driveSecurityCache.Report(profile));
         }
         catch (Exception exception)
         {
@@ -863,6 +917,8 @@ public partial class MainWindow : Window
 
             DriveSecurityTextBlock.Text = $"Drive security: check failed. {exception.Message}";
             DriveSecurityTextBlock.Foreground = (System.Windows.Media.Brush)FindResource("Brush.Status.Alarm");
+            _driveSecurityRequiresElevation = false;
+            UpdateDriveSecurityElevationButton();
         }
     }
 
@@ -874,6 +930,14 @@ public partial class MainWindow : Window
             : report.HasWarnings
                 ? (System.Windows.Media.Brush)FindResource("Brush.Status.Alarm")
                 : (System.Windows.Media.Brush)FindResource("TextMutedBrush");
+        _driveSecurityRequiresElevation = report.RequiresElevation;
+        UpdateDriveSecurityElevationButton();
+    }
+
+    private void UpdateDriveSecurityElevationButton()
+    {
+        ElevatedDriveSecurityButton.Visibility = _driveSecurityRequiresElevation ? Visibility.Visible : Visibility.Collapsed;
+        ElevatedDriveSecurityButton.IsEnabled = _driveSecurityRequiresElevation && !_isBusy && GetSelectedProfile(showStatus: false) is not null;
     }
 
     private void ApplyTaskStatusBrushes(ScheduledTaskSnapshot snapshot)
@@ -964,6 +1028,7 @@ public partial class MainWindow : Window
         ActivityProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ActivityProgressBar.IsIndeterminate = busy;
         UpdateActionSurface(GetSelectedProfile(showStatus: false), _currentTaskSnapshot);
+        UpdateDriveSecurityElevationButton();
         ShowTaskActionCenter(_taskInventory);
         CancelOperationButton.Visibility = busy && _currentOperationCancellationSource is not null ? Visibility.Visible : Visibility.Collapsed;
         CancelOperationButton.IsEnabled = busy && _currentOperationCancellationSource is not null && !_currentOperationCancellationSource.IsCancellationRequested;
@@ -1012,6 +1077,7 @@ public partial class MainWindow : Window
         SetButton(DepartShuttleButton, isShuttleProfile, enabledWhenIdle: true);
         SetButton(DockShuttleButton, isShuttleProfile, enabledWhenIdle: true);
         SetButton(ReceiveShuttleButton, isShuttleProfile, enabledWhenIdle: true);
+        UpdateDriveSecurityElevationButton();
 
         if (!supportsScheduledTask)
         {

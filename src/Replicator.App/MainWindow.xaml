@@ -93,6 +93,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="18" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <Image Source="{StaticResource Icon.Locked}"
                                    Width="14"
@@ -103,6 +104,13 @@
                                        Grid.Column="1"
                                        Text="Drive security not checked."
                                        Foreground="{StaticResource TextMutedBrush}" />
+                            <Button x:Name="ElevatedDriveSecurityButton"
+                                    Grid.Column="2"
+                                    Content="Check All as Admin"
+                                    Click="CheckDriveSecurityAsAdmin_Click"
+                                    Margin="12,0,0,0"
+                                    Padding="10,4"
+                                    Visibility="Collapsed" />
                         </Grid>
                         <ProgressBar x:Name="ActivityProgressBar"
                                      Height="6"
@@ -118,7 +126,12 @@
                                Foreground="{StaticResource StatusSuccessBrush}"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center"
-                               TextAlignment="Right" />
+                               HorizontalAlignment="Right"
+                               MaxWidth="360"
+                               TextAlignment="Right"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                 </Grid>
             </Border>
 

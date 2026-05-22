@@ -13,6 +13,8 @@ public sealed class ProfileDriveSecurityReport
 
     public bool HasWarnings => Items.Any(item => item.Severity == DriveSecuritySeverity.Warning);
 
+    public bool RequiresElevation => Items.Any(item => item.State == DriveSecurityState.PermissionRequired);
+
     public string Summary
     {
         get

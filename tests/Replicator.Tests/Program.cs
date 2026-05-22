@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Xml.Linq;
 using Replicator.Core.Execution;
 using Replicator.Core.Availability;
 using Replicator.Core.Models;
@@ -15,6 +17,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("script generator emits robocopy dry-run script", ScriptGeneratorEmitsDryRunScript),
     ("script generator emits target preflight status", ScriptGeneratorEmitsTargetPreflightStatus),
     ("log reader summarizes latest robocopy log", LogReaderSummarizesLatestRobocopyLog),
+    ("log reader skips locked latest robocopy log", LogReaderSkipsLockedLatestRobocopyLog),
     ("status reader parses latest backup status", StatusReaderParsesLatestBackupStatus),
     ("status reader ignores malformed latest backup status", StatusReaderIgnoresMalformedLatestBackupStatus),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
@@ -37,6 +40,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("scheduled task inventory classifies matched repair and orphaned tasks", ScheduledTaskInventoryClassifiesMatchedRepairAndOrphanedTasks),
     ("scheduled task inventory disables repair for running tasks", ScheduledTaskInventoryDisablesRepairForRunningTasks),
     ("scheduled task inventory reports query failure as unknown", ScheduledTaskInventoryReportsQueryFailureAsUnknown),
+    ("main window status text is layout bounded", MainWindowStatusTextIsLayoutBounded),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
     ("default profile carries local development excludes", DefaultProfileHasDevelopmentExcludes),
     ("validator rejects invalid minute interval", ValidatorRejectsInvalidMinuteInterval),
@@ -46,6 +50,11 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("bitlocker access denied is classified as permission required", BitLockerAccessDeniedIsClassifiedAsPermissionRequired),
     ("powershell bitlocker provider maps access denied to permission required", PowerShellBitLockerProviderMapsAccessDeniedToPermissionRequired),
     ("drive security report treats permission required as a warning", DriveSecurityReportTreatsPermissionRequiredAsWarning),
+    ("drive security report marks permission required checks as elevation ready", DriveSecurityReportMarksPermissionRequiredChecksAsElevationReady),
+    ("drive security cache warms unique roots across profiles", DriveSecurityCacheWarmsUniqueRootsAcrossProfiles),
+    ("elevated bitlocker provider launches hidden admin powershell and parses result file", ElevatedBitLockerProviderLaunchesHiddenAdminPowerShellAndParsesResultFile),
+    ("elevated bitlocker provider batches multiple roots into one admin launch", ElevatedBitLockerProviderBatchesMultipleRootsIntoOneAdminLaunch),
+    ("elevated bitlocker provider treats canceled admin prompt as permission required", ElevatedBitLockerProviderTreatsCanceledAdminPromptAsPermissionRequired),
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
 
@@ -167,6 +176,55 @@ static Task LogReaderSummarizesLatestRobocopyLog()
         Assert(summary.CopiedFiles == 73, "Expected copied/listed file count.");
         Assert(summary.FailedFiles == 0, "Expected failed file count.");
         Assert(summary.TotalDirectories == 42, "Expected total directory count.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task LogReaderSkipsLockedLatestRobocopyLog()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var logsDirectory = Path.Combine(root, "logs");
+    Directory.CreateDirectory(logsDirectory);
+
+    try
+    {
+        var profile = ValidProfile();
+        var slug = PowerShellScriptGenerator.ProfileSlug(profile);
+        var lockedLogPath = Path.Combine(logsDirectory, $"{slug}-20260522-100250.log");
+        var readableLogPath = Path.Combine(logsDirectory, $"{slug}-20260522-100001.log");
+
+        File.WriteAllLines(lockedLogPath, ["locked latest"]);
+        File.WriteAllLines(
+            readableLogPath,
+            [
+                "Replicator backup run",
+                "Mode: Copy - files may be copied",
+                "Source: C:\\work\\scratch",
+                "Destination: D:\\backups\\scratch",
+                "    Dirs :         2         2         0         0         0         0",
+                "   Files :         3         3         0         0         0         0"
+            ]);
+        File.SetLastWriteTimeUtc(readableLogPath, new DateTime(2026, 5, 22, 10, 0, 1, DateTimeKind.Utc));
+        File.SetLastWriteTimeUtc(lockedLogPath, new DateTime(2026, 5, 22, 10, 2, 50, DateTimeKind.Utc));
+
+        using var lockedStream = new FileStream(lockedLogPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var summary = new BackupLogReader(logsDirectory).ReadLatest(profile);
+
+        if (summary is null)
+        {
+            throw new InvalidOperationException("Expected readable previous log summary.");
+        }
+
+        Assert(summary.LogPath == readableLogPath, $"Expected locked latest log to be skipped, got {summary.LogPath}.");
+        Assert(summary.TotalFiles == 3, "Expected previous readable log metrics.");
     }
     finally
     {
@@ -1075,6 +1133,23 @@ static async Task ScheduledTaskInventoryReportsQueryFailureAsUnknown()
     Assert(result.Items[0].Reason.Contains("Access is denied", StringComparison.OrdinalIgnoreCase), $"Unexpected reason: {result.Items[0].Reason}");
 }
 
+static Task MainWindowStatusTextIsLayoutBounded()
+{
+    var xamlPath = Path.Combine(Environment.CurrentDirectory, "src", "Replicator.App", "MainWindow.xaml");
+    var document = XDocument.Load(xamlPath);
+    XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+    XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+    var statusTextBlock = document
+        .Descendants(presentation + "TextBlock")
+        .Single(element => (string?)element.Attribute(xaml + "Name") == "StatusTextBlock");
+
+    Assert(statusTextBlock.Attribute("MaxWidth") is not null, "Status text must have MaxWidth so long errors cannot consume the header grid.");
+    Assert((string?)statusTextBlock.Attribute("TextTrimming") == "CharacterEllipsis", "Status text must trim long messages.");
+    Assert((string?)statusTextBlock.Attribute("TextWrapping") == "NoWrap", "Status text must not grow the header vertically.");
+    return Task.CompletedTask;
+}
+
 static Task MinuteSchedulesEmitSchtasksMinuteCadence()
 {
     var profile = ValidProfile();
@@ -1260,6 +1335,182 @@ static Task DriveSecurityReportTreatsPermissionRequiredAsWarning()
     return Task.CompletedTask;
 }
 
+static Task DriveSecurityReportMarksPermissionRequiredChecksAsElevationReady()
+{
+    var report = new ProfileDriveSecurityReport(
+    [
+        new DriveSecurityItem(
+            "Source drive",
+            @"D:\repos\personal",
+            @"D:\",
+            DriveSecurityState.PermissionRequired,
+            DriveSecuritySeverity.Warning,
+            @"Drive security: Source drive BitLocker status requires elevated permissions (D:\). Replicator can continue, but encryption state was not confirmed.")
+    ]);
+
+    Assert(report.RequiresElevation, "Expected permission-required drive security report to expose an elevated retry action.");
+    return Task.CompletedTask;
+}
+
+static async Task DriveSecurityCacheWarmsUniqueRootsAcrossProfiles()
+{
+    var first = ValidProfile();
+    first.SourcePath = @"C:\work\alpha";
+    first.Target.Path = @"D:\backup\alpha";
+
+    var second = ValidProfile();
+    second.SourcePath = @"C:\work\beta";
+    second.Target.Path = @"E:\backup\beta";
+
+    var provider = new CountingBitLockerStatusProvider();
+    provider.Results[@"C:\"] = new DriveSecurityItem(
+        "Cached drive",
+        @"C:\",
+        @"C:\",
+        DriveSecurityState.Protected,
+        DriveSecuritySeverity.Info,
+        @"Drive security: Cached drive is BitLocker protected (C:\).");
+    provider.Results[@"D:\"] = new DriveSecurityItem(
+        "Cached drive",
+        @"D:\",
+        @"D:\",
+        DriveSecurityState.Protected,
+        DriveSecuritySeverity.Info,
+        @"Drive security: Cached drive is BitLocker protected (D:\).");
+    provider.Results[@"E:\"] = new DriveSecurityItem(
+        "Cached drive",
+        @"E:\",
+        @"E:\",
+        DriveSecurityState.Unprotected,
+        DriveSecuritySeverity.Warning,
+        @"Drive security: Cached drive is not BitLocker protected (E:\).");
+
+    var cache = new ProfileDriveSecurityCache();
+    await cache.WarmMissingAsync([first, second], provider);
+
+    Assert(provider.Calls.Count == 3, $"Expected one check per unique root, got {provider.Calls.Count}.");
+    Assert(provider.Calls.Count(root => root == @"C:\") == 1, "Expected shared source root to be checked once.");
+
+    var firstReport = cache.Report(first);
+    var secondReport = cache.Report(second);
+
+    Assert(firstReport.Items.Count == 2, "Expected cached source and target items for first profile.");
+    Assert(secondReport.Items.Count == 2, "Expected cached source and target items for second profile.");
+    Assert(secondReport.Summary.Contains("Target drive is not BitLocker protected", StringComparison.OrdinalIgnoreCase), $"Expected target-specific cached message: {secondReport.Summary}");
+
+    await cache.WarmMissingAsync([first, second], provider);
+    Assert(provider.Calls.Count == 3, $"Expected cached roots to avoid repeat checks, got {provider.Calls.Count} calls.");
+}
+
+static async Task ElevatedBitLockerProviderLaunchesHiddenAdminPowerShellAndParsesResultFile()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var runner = new FakeElevatedProcessRunner(arguments =>
+        {
+            var outputIndex = arguments.ToList().IndexOf("-OutputPath");
+            Assert(outputIndex >= 0 && outputIndex + 1 < arguments.Count, "Expected elevated helper output path argument.");
+            File.WriteAllText(arguments[outputIndex + 1], """
+                {"Succeeded":true,"MountPoint":"D:","VolumeStatus":"FullyEncrypted","ProtectionStatus":"On","LockStatus":"Unlocked","EncryptionPercentage":100}
+                """);
+
+            return Task.FromResult(0);
+        });
+
+        var item = await new ElevatedPowerShellBitLockerStatusProvider(runner, root).CheckAsync(
+            "Source drive",
+            @"D:\repos\personal",
+            @"D:\");
+
+        Assert(item.State == DriveSecurityState.Protected, $"Expected protected state, got {item.State}.");
+        Assert(runner.LastFileName.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase), $"Unexpected elevated file: {runner.LastFileName}");
+        Assert(runner.LastArguments.Contains("-WindowStyle"), "Expected hidden window style switch.");
+        Assert(runner.LastArguments.Contains("Hidden"), "Expected hidden PowerShell window.");
+        Assert(runner.LastArguments.Contains("-File"), "Expected elevated helper script to run via -File.");
+        Assert(runner.LastArguments.Contains("-RequestsJson"), "Expected batched requests JSON argument.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ElevatedBitLockerProviderBatchesMultipleRootsIntoOneAdminLaunch()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var runner = new FakeElevatedProcessRunner(arguments =>
+        {
+            var outputIndex = arguments.ToList().IndexOf("-OutputPath");
+            Assert(outputIndex >= 0 && outputIndex + 1 < arguments.Count, "Expected elevated helper output path argument.");
+            File.WriteAllText(arguments[outputIndex + 1], """
+                [
+                  {"Root":"D:\\","Succeeded":true,"MountPoint":"D:","VolumeStatus":"FullyEncrypted","ProtectionStatus":"On","LockStatus":"Unlocked","EncryptionPercentage":100},
+                  {"Root":"H:\\","Succeeded":true,"MountPoint":"H:","VolumeStatus":"FullyDecrypted","ProtectionStatus":"Off","LockStatus":"Unlocked","EncryptionPercentage":0}
+                ]
+                """);
+
+            return Task.FromResult(0);
+        });
+
+        var provider = new ElevatedPowerShellBitLockerStatusProvider(runner, root);
+        var results = await provider.CheckAsync(
+            [
+                new DriveSecurityCandidate(Guid.NewGuid(), "Source drive", @"D:\repos\personal", @"D:\"),
+                new DriveSecurityCandidate(Guid.NewGuid(), "Target drive", @"H:\dev\personal", @"H:\")
+            ]);
+
+        Assert(runner.RunCount == 1, $"Expected one elevated launch, got {runner.RunCount}.");
+        Assert(results.Count == 2, $"Expected two drive results, got {results.Count}.");
+        Assert(results[@"D:\"].State == DriveSecurityState.Protected, $"Unexpected D state: {results[@"D:\"].State}");
+        Assert(results[@"H:\"].State == DriveSecurityState.Unprotected, $"Unexpected H state: {results[@"H:\"].State}");
+        Assert(runner.LastArguments.Contains("-RequestsJson"), "Expected batched requests JSON argument.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ElevatedBitLockerProviderTreatsCanceledAdminPromptAsPermissionRequired()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var runner = new FakeElevatedProcessRunner(_ => throw new Win32Exception(1223, "The operation was canceled by the user."));
+    var item = await new ElevatedPowerShellBitLockerStatusProvider(runner).CheckAsync(
+        "Source drive",
+        @"D:\repos\personal",
+        @"D:\");
+
+    Assert(item.State == DriveSecurityState.PermissionRequired, $"Expected permission-required state, got {item.State}.");
+    Assert(item.Message.Contains("administrator check was canceled", StringComparison.OrdinalIgnoreCase), $"Unexpected cancellation message: {item.Message}");
+}
+
 static async Task ProfileDriveSecurityCheckerSummarizesBitLockerPosture()
 {
     var profile = ValidProfile();
@@ -1412,6 +1663,25 @@ sealed class FakeBitLockerStatusProvider : IBitLockerStatusProvider
     }
 }
 
+sealed class CountingBitLockerStatusProvider : IBitLockerStatusProvider
+{
+    public Dictionary<string, DriveSecurityItem> Results { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<string> Calls { get; } = [];
+
+    public Task<DriveSecurityItem> CheckAsync(
+        string label,
+        string path,
+        string root,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add(root);
+        return Task.FromResult(Results.TryGetValue(root, out var result)
+            ? result
+            : new DriveSecurityItem(label, path, root, DriveSecurityState.Unknown, DriveSecuritySeverity.Warning, $"Unknown: {root}"));
+    }
+}
+
 sealed class FakeProcessRunner(ProcessResult result) : IProcessRunner
 {
     public IReadOnlyList<string> LastArguments { get; private set; } = [];
@@ -1423,5 +1693,25 @@ sealed class FakeProcessRunner(ProcessResult result) : IProcessRunner
     {
         LastArguments = arguments.ToList();
         return Task.FromResult(result);
+    }
+}
+
+sealed class FakeElevatedProcessRunner(Func<IReadOnlyList<string>, Task<int>> run) : IElevatedProcessRunner
+{
+    public int RunCount { get; private set; }
+
+    public string LastFileName { get; private set; } = string.Empty;
+
+    public IReadOnlyList<string> LastArguments { get; private set; } = [];
+
+    public async Task<int> RunAsync(
+        string fileName,
+        IEnumerable<string> arguments,
+        CancellationToken cancellationToken = default)
+    {
+        RunCount++;
+        LastFileName = fileName;
+        LastArguments = arguments.ToList();
+        return await run(LastArguments);
     }
 }

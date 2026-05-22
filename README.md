@@ -30,7 +30,7 @@ The app separates several concepts that are often conflated:
 - Manual, minute-based, hourly, daily, and weekly schedule cadences.
 - Source/target/shuttle availability preflight for manual runs, shuttle operations, and generated scheduled scripts.
 - Shuttle operations run off the UI thread with file-count progress and cancellation.
-- BitLocker posture visibility for local Windows drive roots.
+- BitLocker posture visibility for local Windows drive roots, cached by drive root across profile switching.
 - Repeatable smoke-test gate and manual smoke plan.
 - Dry-run defaults for new profiles.
 
@@ -145,9 +145,12 @@ Implemented BitLocker visibility:
 
 - Detect whether a target or shuttle drive is BitLocker-protected.
 - Show drive lock/unlock/protection state in the profile UI.
+- Cache drive posture by local drive root for the current app session.
+- Offer a narrow `Check All as Admin` verification action for permission-required BitLocker status checks.
 
 Planned BitLocker enforcement:
 
+- Replace the current elevated PowerShell verification helper with a branded Replicator-owned elevated helper executable.
 - Block `Prepare Shuttle`, `Receive Changes`, and scheduled backup writes when a required protected drive is locked or unprotected.
 - Offer guided setup for external drives using BitLocker To Go.
 - Store recovery-key reminders and policy metadata, but never store recovery keys in Replicator profile JSON.
@@ -230,7 +233,7 @@ Field note: shuttling about 6,500 files worked, but caused major UI lockup in th
 - S3-compatible targets are not implemented yet.
 - rclone, Kopia, restic, and Git shuttle engines are future adapters.
 - Automatic external-drive detection is not implemented yet.
-- BitLocker posture visibility is implemented for local Windows drive roots. Secure-drive policy enforcement is not implemented yet.
+- BitLocker posture visibility is implemented for local Windows drive roots, including session cache and batch elevated verification. Secure-drive policy enforcement and a branded elevated helper are not implemented yet.
 - Shuttle conflict handling currently preserves overwritten local files, but does not yet provide a full merge UI.
 - Restore/converge workflows are not implemented yet.
 - Hyper-V/VM backup scenarios need special handling and should not be treated as ordinary live folder copies.
@@ -254,7 +257,7 @@ Field note: shuttling about 6,500 files worked, but caused major UI lockup in th
 Near-term backlog items:
 
 - **Graceful unavailable states**: backup-profile preflight, scheduled-script failures, and shuttle operation availability blocks are implemented. Next expansion is secure-drive policy detail and BitLocker enforcement.
-- **BitLocker posture checks**: first visibility slice implemented. Replicator now checks local Windows profile drive roots and reports protected, unprotected, locked, unavailable, permission-required, or unknown posture. Remaining work: policy enforcement, unlock guidance, and BitLocker To Go setup flow.
+- **BitLocker posture checks**: visibility and verification slices implemented. Replicator now checks local Windows profile drive roots, caches results by drive root, runs one elevated `Check All as Admin` pass across all profile-attached local roots when needed, and reports protected, unprotected, locked, unavailable, permission-required, or unknown posture. Remaining work: branded elevated helper, policy enforcement, unlock guidance, and BitLocker To Go setup flow.
 - **Known shuttle drive detection**: add a tray app or Windows Service that watches for volume arrival, recognizes member drives, and prompts `Dock Shuttle` when relevant.
 - **Drive identity over drive letters**: bind profiles to volume identity/label/serial metadata so `E:` becoming `F:` does not break profiles.
 - **Shuttle protect cadence**: add a dedicated scheduled shuttle-protect runner that writes manifests and respects pending inbound state, rather than reusing the backup robocopy runner.

@@ -12,13 +12,26 @@ public sealed class BackupLogReader(string logsDirectory)
         }
 
         var slug = PowerShellScriptGenerator.ProfileSlug(profile);
-        var latestLog = Directory
+        var logFiles = Directory
             .EnumerateFiles(logsDirectory, $"{slug}-*.log")
             .Select(path => new FileInfo(path))
-            .OrderByDescending(file => file.LastWriteTimeUtc)
-            .FirstOrDefault();
+            .OrderByDescending(file => file.LastWriteTimeUtc);
 
-        return latestLog is null ? null : Read(latestLog.FullName);
+        foreach (var logFile in logFiles)
+        {
+            try
+            {
+                return Read(logFile.FullName);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return null;
     }
 
     public BackupRunSummary Read(string logPath)

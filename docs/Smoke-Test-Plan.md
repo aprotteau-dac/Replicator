@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-36 test(s) passed.
+43 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -23,6 +23,7 @@ This gate covers:
 - profile validation
 - script generation
 - robocopy log parsing
+- locked latest-log fallback
 - JSON profile storage
 - shuttle prepare, depart, dock, receive, and conflict preservation
 - shuttle manifest file entries and hash-backed skip analysis
@@ -42,6 +43,8 @@ This gate covers:
 - availability checks for missing source, creatable target, and unavailable drive
 - BitLocker parser classification
 - BitLocker permission-required classification and provider mapping
+- drive-security cache behavior across profile roots
+- elevated BitLocker batch verification behavior
 - profile drive-security summary behavior
 
 Optional long shuttle smoke:
@@ -203,14 +206,19 @@ Use the same profile with a local drive target or an external BitLocker To Go dr
 1. Select a profile.
 2. Click `Refresh Status` or save the profile.
 3. Confirm the header shows a drive-security line.
-4. On an unprotected disposable drive, confirm the line warns that the drive is not BitLocker protected.
-5. On a protected unlocked drive, confirm the line reports BitLocker protected.
-6. If a locked external drive is available, confirm the line reports locked or unavailable.
+4. Switch to another profile that uses one of the same drive roots, then switch back.
+5. Confirm the known drive-security posture remains stable across profile switching.
+6. On an unprotected disposable drive, confirm the line warns that the drive is not BitLocker protected.
+7. On a protected unlocked drive, confirm the line reports BitLocker protected.
+8. If Windows reports permission-required, click `Check All as Admin` once and confirm all profile-attached local drive roots are refreshed from that elevated pass.
+9. If a locked external drive is available, confirm the line reports locked or unavailable.
 
 Pass criteria:
 
 - drive-security check never blocks the UI permanently
 - protected, unprotected, locked, unavailable, permission-required, or unknown states are visible
+- cached drive-security results survive profile switching for the current app session
+- the elevated admin verification path checks all profile-attached local roots in one action
 - Replicator warns only; it does not enforce blocking policy yet
 
 ## Stop Criteria
@@ -222,7 +230,10 @@ Stop the smoke pass and open a [GitHub bug](Bug-Tracking.md) if any of these occ
 - scheduled task action buttons contradict the task state
 - scheduled task execution opens a visible PowerShell or robocopy window
 - unavailable source or target starts a copy anyway
+- a long status/error message makes the selected-profile pane disappear or pushes controls out of view
+- a locked active log file surfaces a raw file-lock exception in the header
 - BitLocker command failure crashes the app instead of reporting unavailable, permission-required, or unknown posture
+- profile switching repeatedly loses known drive-security status for the same drive root
 - conflict receive overwrites local content without preserving a conflict copy
 
 ## Evidence To Capture
