@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Xml.Linq;
+using Replicator.Core;
 using Replicator.Core.Execution;
 using Replicator.Core.Availability;
 using Replicator.Core.Models;
@@ -35,6 +36,34 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("action surface exposes shuttle commands and hides backup run commands", ActionSurfaceExposesShuttleCommandsAndHidesBackupRunCommands),
     ("action surface disables profile mutation while busy", ActionSurfaceDisablesProfileMutationWhileBusy),
     ("task inventory distinguishes action center from review visibility", TaskInventoryDistinguishesActionCenterFromReviewVisibility),
+    ("main window load command loads saved profiles", MainWindowLoadCommandLoadsSavedProfiles),
+    ("main window view model loads saved profiles and selects first profile", MainWindowViewModelLoadsSavedProfilesAndSelectsFirstProfile),
+    ("main window view model creates and selects default profile", MainWindowViewModelCreatesAndSelectsDefaultProfile),
+    ("delete profile cancel leaves profiles unchanged", DeleteProfileCancelLeavesProfilesUnchanged),
+    ("delete profile confirm deletes profile and scheduled task", DeleteProfileConfirmDeletesProfileAndScheduledTask),
+    ("browse source cancel leaves source path unchanged", BrowseSourceCancelLeavesSourcePathUnchanged),
+    ("browse destination applies selected folder", BrowseDestinationAppliesSelectedFolder),
+    ("save profile applies form and persists selected profile", SaveProfileAppliesFormAndPersistsSelectedProfile),
+    ("generate script applies form persists profile and appends generated script path", GenerateScriptAppliesFormPersistsProfileAndAppendsGeneratedScriptPath),
+    ("install task writes script installs task and refreshes inventory", InstallTaskWritesScriptInstallsTaskAndRefreshesInventory),
+    ("preview dry run applies form and invokes powershell with dry run switch", PreviewDryRunAppliesFormAndInvokesPowerShellWithDryRunSwitch),
+    ("run now applies form and invokes powershell without dry run switch", RunNowAppliesFormAndInvokesPowerShellWithoutDryRunSwitch),
+    ("enable task calls scheduled service and refreshes inventory", EnableTaskCallsScheduledServiceAndRefreshesInventory),
+    ("disable task calls scheduled service and refreshes inventory", DisableTaskCallsScheduledServiceAndRefreshesInventory),
+    ("remove task calls scheduled service and refreshes inventory", RemoveTaskCallsScheduledServiceAndRefreshesInventory),
+    ("start scheduled task reports missing task without running", StartScheduledTaskReportsMissingTaskWithoutRunning),
+    ("start scheduled task reports repair needed without running", StartScheduledTaskReportsRepairNeededWithoutRunning),
+    ("refresh status updates task fields and action surface", RefreshStatusUpdatesTaskFieldsAndActionSurface),
+    ("review task inventory opens rows or reports none", ReviewTaskInventoryOpensRowsOrReportsNone),
+    ("repair selected inventory task installs profile task", RepairSelectedInventoryTaskInstallsProfileTask),
+    ("main window view model marks drive security permission required for elevation", MainWindowViewModelMarksDriveSecurityPermissionRequiredForElevation),
+    ("check drive security as admin refreshes selected profile elevation state", CheckDriveSecurityAsAdminRefreshesSelectedProfileElevationState),
+    ("prepare shuttle command runs dry run and reports result", PrepareShuttleCommandRunsDryRunAndReportsResult),
+    ("depart shuttle command marks prepared payload ready", DepartShuttleCommandMarksPreparedPayloadReady),
+    ("dock shuttle command reports no inbound changes", DockShuttleCommandReportsNoInboundChanges),
+    ("receive shuttle command reports no inbound changes", ReceiveShuttleCommandReportsNoInboundChanges),
+    ("busy operation disables mutation and restores action surface", BusyOperationDisablesMutationAndRestoresActionSurface),
+    ("cancel operation command is disabled when idle", CancelOperationCommandIsDisabledWhenIdle),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
     ("shuttle source enumeration prunes excluded directories", ShuttleSourceEnumerationPrunesExcludedDirectories),
@@ -316,6 +345,732 @@ static Task TaskInventoryDistinguishesActionCenterFromReviewVisibility()
 
     Assert(viewModel.IsReviewOpen, "Review surface should open when inventory rows exist.");
     return Task.CompletedTask;
+}
+
+static async Task MainWindowViewModelLoadsSavedProfilesAndSelectsFirstProfile()
+{
+    var first = ValidProfile();
+    first.Name = "First profile";
+    first.SourcePath = @"C:\work\first";
+    first.Target.Path = @"D:\backups\first";
+    var second = ValidProfile();
+    second.Name = "Second profile";
+
+    var viewModel = CreateMainWindowViewModel([first, second]);
+
+    await viewModel.LoadAsync();
+
+    Assert(viewModel.Profiles.Count == 2, $"Expected two loaded profiles, got {viewModel.Profiles.Count}.");
+    Assert(ReferenceEquals(viewModel.SelectedProfile, viewModel.Profiles[0]), "Expected the first loaded profile to be selected.");
+    Assert(viewModel.HeaderText == "First profile", $"Unexpected header: {viewModel.HeaderText}");
+    Assert(viewModel.Form.Name == "First profile", $"Unexpected form name: {viewModel.Form.Name}");
+    Assert(viewModel.Form.SourcePath == first.SourcePath, $"Unexpected source path: {viewModel.Form.SourcePath}");
+    Assert(viewModel.Form.DestinationPath == first.Target.Path, $"Unexpected destination path: {viewModel.Form.DestinationPath}");
+    Assert(viewModel.Status.Text == "Ready.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.TaskInventory.Summary == "No Replicator scheduled tasks found.", $"Unexpected inventory summary: {viewModel.TaskInventory.Summary}");
+}
+
+static async Task MainWindowLoadCommandLoadsSavedProfiles()
+{
+    var profile = ValidProfile();
+    profile.Name = "Load command profile";
+    var viewModel = CreateMainWindowViewModel([profile]);
+
+    await viewModel.LoadCommand.ExecuteAsync();
+
+    Assert(viewModel.Profiles.Count == 1, $"Expected one profile, got {viewModel.Profiles.Count}.");
+    Assert(viewModel.HeaderText == "Load command profile", $"Unexpected header: {viewModel.HeaderText}");
+}
+
+static async Task MainWindowViewModelCreatesAndSelectsDefaultProfile()
+{
+    var existing = ValidProfile();
+    existing.Name = "Existing profile";
+    var viewModel = CreateMainWindowViewModel([existing]);
+    await viewModel.LoadAsync();
+
+    viewModel.NewProfileCommand.Execute(null);
+
+    Assert(viewModel.Profiles.Count == 2, $"Expected one new profile, got {viewModel.Profiles.Count} profiles.");
+    Assert(!ReferenceEquals(viewModel.SelectedProfile, existing), "Expected the new profile to be selected.");
+    Assert(ReferenceEquals(viewModel.SelectedProfile, viewModel.Profiles[1]), "Expected the selected profile to be the new collection item.");
+    Assert(viewModel.Form.Name == "New backup profile", $"Unexpected form name: {viewModel.Form.Name}");
+    Assert(viewModel.HeaderText == "New backup profile", $"Unexpected header: {viewModel.HeaderText}");
+    Assert(viewModel.Status.Text == "New profile created.", $"Unexpected status: {viewModel.Status.Text}");
+}
+
+static async Task DeleteProfileCancelLeavesProfilesUnchanged()
+{
+    var profile = ValidProfile();
+    var store = new FakeProfileStore([profile]);
+    var scheduledTasks = new FakeScheduledTaskService();
+    var confirmation = new FakeUserConfirmation();
+    confirmation.Results.Enqueue(false);
+    var viewModel = CreateMainWindowViewModel(
+        profileStore: store,
+        scheduledTasks: scheduledTasks,
+        confirmation: confirmation);
+    await viewModel.LoadAsync();
+
+    await viewModel.DeleteProfileCommand.ExecuteAsync();
+
+    Assert(viewModel.Profiles.Count == 1, $"Expected profile to remain, got {viewModel.Profiles.Count}.");
+    Assert(ReferenceEquals(viewModel.SelectedProfile, profile), "Expected selected profile to remain unchanged.");
+    Assert(store.Deletes.Count == 0, "Cancel should not delete from the profile store.");
+    Assert(scheduledTasks.Deletes.Count == 0, "Cancel should not delete the scheduled task.");
+    Assert(viewModel.Status.Text == "Ready.", $"Unexpected status after cancel: {viewModel.Status.Text}");
+}
+
+static async Task DeleteProfileConfirmDeletesProfileAndScheduledTask()
+{
+    var profile = ValidProfile();
+    profile.Name = "Remove me";
+    var store = new FakeProfileStore([profile]);
+    var scheduledTasks = new FakeScheduledTaskService();
+    var inventory = new FakeScheduledTaskInventoryService();
+    var confirmation = new FakeUserConfirmation();
+    confirmation.Results.Enqueue(true);
+    var viewModel = CreateMainWindowViewModel(
+        profileStore: store,
+        scheduledTasks: scheduledTasks,
+        taskInventoryService: inventory,
+        confirmation: confirmation);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    await viewModel.DeleteProfileCommand.ExecuteAsync();
+
+    Assert(scheduledTasks.Deletes.Count == 1, $"Expected one scheduled task delete, got {scheduledTasks.Deletes.Count}.");
+    Assert(ReferenceEquals(scheduledTasks.Deletes[0], profile), "Expected scheduled task delete to receive the selected profile.");
+    Assert(store.Deletes.Count == 1 && store.Deletes[0] == profile.Id, "Expected selected profile to be deleted from the store.");
+    Assert(viewModel.Profiles.Count == 1, $"Expected fallback default profile after deleting the last profile, got {viewModel.Profiles.Count}.");
+    Assert(!ReferenceEquals(viewModel.SelectedProfile, profile), "Expected deleted profile to no longer be selected.");
+    Assert(viewModel.HeaderText == "New backup profile", $"Unexpected fallback header: {viewModel.HeaderText}");
+    Assert(viewModel.OutputText.Contains("delete output", StringComparison.Ordinal), $"Expected task output to be appended, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Profile removed.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected deletion to refresh task inventory.");
+}
+
+static async Task BrowseSourceCancelLeavesSourcePathUnchanged()
+{
+    var profile = ValidProfile();
+    profile.SourcePath = @"C:\work\original";
+    var folderPicker = new FakeFolderPicker();
+    var viewModel = CreateMainWindowViewModel([profile], folderPicker: folderPicker);
+    await viewModel.LoadAsync();
+
+    await viewModel.BrowseSourceCommand.ExecuteAsync();
+
+    Assert(viewModel.Form.SourcePath == profile.SourcePath, $"Expected source path to remain unchanged, got {viewModel.Form.SourcePath}.");
+    Assert(folderPicker.InitialPaths.Count == 1 && folderPicker.InitialPaths[0] == profile.SourcePath, "Expected picker to receive the current source path.");
+}
+
+static async Task BrowseDestinationAppliesSelectedFolder()
+{
+    var profile = ValidProfile();
+    profile.Target.Path = @"D:\backups\original";
+    var folderPicker = new FakeFolderPicker();
+    folderPicker.Results.Enqueue(@"E:\backups\selected");
+    var viewModel = CreateMainWindowViewModel([profile], folderPicker: folderPicker);
+    await viewModel.LoadAsync();
+
+    await viewModel.BrowseDestinationCommand.ExecuteAsync();
+
+    Assert(viewModel.Form.DestinationPath == @"E:\backups\selected", $"Expected selected destination, got {viewModel.Form.DestinationPath}.");
+    Assert(folderPicker.InitialPaths.Count == 1 && folderPicker.InitialPaths[0] == profile.Target.Path, "Expected picker to receive the current destination path.");
+}
+
+static async Task SaveProfileAppliesFormAndPersistsSelectedProfile()
+{
+    var profile = ValidProfile();
+    var store = new FakeProfileStore([profile]);
+    var inventory = new FakeScheduledTaskInventoryService();
+    var viewModel = CreateMainWindowViewModel(
+        profileStore: store,
+        taskInventoryService: inventory);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    viewModel.Form.Name = "Saved profile";
+    viewModel.Form.SourcePath = @"C:\work\saved";
+    viewModel.Form.DestinationPath = @"D:\backups\saved";
+    viewModel.Form.TimeText = "07:15";
+
+    await viewModel.SaveProfileCommand.ExecuteAsync();
+
+    Assert(profile.Name == "Saved profile", $"Expected profile name to be applied, got {profile.Name}.");
+    Assert(profile.SourcePath == @"C:\work\saved", $"Expected source path to be applied, got {profile.SourcePath}.");
+    Assert(profile.Target.Path == @"D:\backups\saved", $"Expected destination path to be applied, got {profile.Target.Path}.");
+    Assert(profile.Schedule.TimeOfDay == new TimeOnly(7, 15), $"Expected start time to be applied, got {profile.Schedule.TimeOfDay}.");
+    Assert(store.Upserts.Count == 1 && ReferenceEquals(store.Upserts[0], profile), "Expected selected profile to be upserted.");
+    Assert(viewModel.HeaderText == "Saved profile", $"Unexpected header: {viewModel.HeaderText}");
+    Assert(viewModel.Status.Text == "Profile saved.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected save to refresh task inventory.");
+}
+
+static async Task GenerateScriptAppliesFormPersistsProfileAndAppendsGeneratedScriptPath()
+{
+    var profile = ValidProfile();
+    var store = new FakeProfileStore([profile]);
+    var viewModel = CreateMainWindowViewModel(profileStore: store);
+    await viewModel.LoadAsync();
+    viewModel.Form.Name = "Generated profile";
+
+    await viewModel.GenerateScriptCommand.ExecuteAsync();
+
+    Assert(profile.Name == "Generated profile", $"Expected form edits to be applied, got {profile.Name}.");
+    Assert(store.Upserts.Count == 1 && ReferenceEquals(store.Upserts[0], profile), "Expected generated profile to be persisted.");
+    Assert(viewModel.OutputText.Contains("Generated script:", StringComparison.Ordinal), $"Expected generated script output, got: {viewModel.OutputText}");
+    var generatedPath = viewModel.OutputText.Split("Generated script:", StringSplitOptions.None)[1].Trim();
+    Assert(File.Exists(generatedPath), $"Expected generated script to exist at {generatedPath}.");
+    Assert(viewModel.Status.Text == "Script generated.", $"Unexpected status: {viewModel.Status.Text}");
+}
+
+static async Task InstallTaskWritesScriptInstallsTaskAndRefreshesInventory()
+{
+    var profile = ValidProfile();
+    var store = new FakeProfileStore([profile]);
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Ready,
+            "6/3/2026 6:00:00 PM",
+            "6/2/2026 6:00:00 PM",
+            0,
+            string.Empty)
+    };
+    var inventory = new FakeScheduledTaskInventoryService();
+    var viewModel = CreateMainWindowViewModel(
+        profileStore: store,
+        scheduledTasks: scheduledTasks,
+        taskInventoryService: inventory);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    await viewModel.InstallTaskCommand.ExecuteAsync();
+
+    Assert(store.Upserts.Count == 1 && ReferenceEquals(store.Upserts[0], profile), "Expected install to persist the selected profile.");
+    Assert(scheduledTasks.Installs.Count == 1 && ReferenceEquals(scheduledTasks.Installs[0], profile), "Expected scheduled task install for the selected profile.");
+    Assert(File.Exists(scheduledTasks.LastInstallScriptPath), $"Expected install script to be written at {scheduledTasks.LastInstallScriptPath}.");
+    Assert(viewModel.OutputText.Contains("install output", StringComparison.Ordinal), $"Expected install output to be appended, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Task installed.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.TaskNameText == ScheduledTaskName.ForProfile(profile), $"Unexpected task name: {viewModel.TaskNameText}");
+    Assert(viewModel.ActionSurface.InstallTaskLabel == "Update Task", $"Unexpected install label: {viewModel.ActionSurface.InstallTaskLabel}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected install to refresh task inventory.");
+}
+
+static async Task PreviewDryRunAppliesFormAndInvokesPowerShellWithDryRunSwitch()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var target = Path.Combine(root, "target");
+    Directory.CreateDirectory(source);
+    Directory.CreateDirectory(target);
+
+    var profile = ValidProfile();
+    profile.SourcePath = source;
+    profile.Target.Path = target;
+    profile.DryRun = false;
+    var store = new FakeProfileStore([profile]);
+    var processRunner = new FakeProcessRunner(new ProcessResult(0, "preview output", string.Empty));
+    var viewModel = CreateMainWindowViewModel(
+        profileStore: store,
+        processRunner: processRunner);
+    await viewModel.LoadAsync();
+
+    await viewModel.PreviewDryRunCommand.ExecuteAsync();
+
+    Assert(store.Upserts.Count == 1 && ReferenceEquals(store.Upserts[0], profile), "Expected dry-run preview to persist the selected profile.");
+    Assert(processRunner.LastFileName.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase), $"Unexpected process: {processRunner.LastFileName}");
+    Assert(processRunner.LastArguments.Contains("-DryRun"), "Expected preview dry run to pass the -DryRun switch.");
+    Assert(processRunner.LastArguments.Contains("-File"), "Expected generated script to be invoked by file path.");
+    Assert(viewModel.OutputText.Contains("preview output", StringComparison.Ordinal), $"Expected process output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Dry run completed. Latest log is shown below.", $"Unexpected status: {viewModel.Status.Text}");
+}
+
+static async Task RunNowAppliesFormAndInvokesPowerShellWithoutDryRunSwitch()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var target = Path.Combine(root, "target");
+    Directory.CreateDirectory(source);
+    Directory.CreateDirectory(target);
+
+    var profile = ValidProfile();
+    profile.SourcePath = source;
+    profile.Target.Path = target;
+    profile.DryRun = false;
+    var store = new FakeProfileStore([profile]);
+    var processRunner = new FakeProcessRunner(new ProcessResult(0, "run output", string.Empty));
+    var viewModel = CreateMainWindowViewModel(
+        profileStore: store,
+        processRunner: processRunner);
+    await viewModel.LoadAsync();
+
+    await viewModel.RunNowCommand.ExecuteAsync();
+
+    Assert(store.Upserts.Count == 1 && ReferenceEquals(store.Upserts[0], profile), "Expected Run Now to persist the selected profile.");
+    Assert(processRunner.LastFileName.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase), $"Unexpected process: {processRunner.LastFileName}");
+    Assert(!processRunner.LastArguments.Contains("-DryRun"), "Run Now should not force the -DryRun switch.");
+    Assert(viewModel.OutputText.Contains("run output", StringComparison.Ordinal), $"Expected process output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Run completed. Latest log is shown below.", $"Unexpected status: {viewModel.Status.Text}");
+}
+
+static async Task EnableTaskCallsScheduledServiceAndRefreshesInventory()
+{
+    var profile = ValidProfile();
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Ready,
+            "6/3/2026 6:00:00 PM",
+            string.Empty,
+            0,
+            string.Empty)
+    };
+    var inventory = new FakeScheduledTaskInventoryService();
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        scheduledTasks: scheduledTasks,
+        taskInventoryService: inventory);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    await viewModel.EnableTaskCommand.ExecuteAsync();
+
+    Assert(scheduledTasks.Enables.Count == 1 && ReferenceEquals(scheduledTasks.Enables[0], profile), "Expected enable to target the selected profile.");
+    Assert(viewModel.OutputText.Contains("enable output", StringComparison.Ordinal), $"Expected enable output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Task enabled.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.NextRunText == "6/3/2026 6:00:00 PM", $"Expected refreshed next run, got: {viewModel.NextRunText}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected enable to refresh task inventory.");
+}
+
+static async Task DisableTaskCallsScheduledServiceAndRefreshesInventory()
+{
+    var profile = ValidProfile();
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Disabled,
+            string.Empty,
+            string.Empty,
+            0,
+            string.Empty)
+    };
+    var inventory = new FakeScheduledTaskInventoryService();
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        scheduledTasks: scheduledTasks,
+        taskInventoryService: inventory);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    await viewModel.DisableTaskCommand.ExecuteAsync();
+
+    Assert(scheduledTasks.Disables.Count == 1 && ReferenceEquals(scheduledTasks.Disables[0], profile), "Expected disable to target the selected profile.");
+    Assert(viewModel.OutputText.Contains("disable output", StringComparison.Ordinal), $"Expected disable output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Task disabled.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.NextRunText == ScheduledTaskState.Disabled.ToString(), $"Expected disabled next-run text, got: {viewModel.NextRunText}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected disable to refresh task inventory.");
+}
+
+static async Task RemoveTaskCallsScheduledServiceAndRefreshesInventory()
+{
+    var profile = ValidProfile();
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Missing,
+            string.Empty,
+            string.Empty,
+            0,
+            string.Empty)
+    };
+    var inventory = new FakeScheduledTaskInventoryService();
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        scheduledTasks: scheduledTasks,
+        taskInventoryService: inventory);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    await viewModel.RemoveTaskCommand.ExecuteAsync();
+
+    Assert(scheduledTasks.Deletes.Count == 1 && ReferenceEquals(scheduledTasks.Deletes[0], profile), "Expected remove task to target the selected profile.");
+    Assert(viewModel.OutputText.Contains("delete output", StringComparison.Ordinal), $"Expected delete output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Task deleted.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.NextRunText == ScheduledTaskState.Missing.ToString(), $"Expected missing next-run text, got: {viewModel.NextRunText}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected remove to refresh task inventory.");
+}
+
+static async Task StartScheduledTaskReportsMissingTaskWithoutRunning()
+{
+    var profile = ValidProfile();
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Missing,
+            string.Empty,
+            string.Empty,
+            0,
+            "missing query output")
+    };
+    var viewModel = CreateMainWindowViewModel([profile], scheduledTasks: scheduledTasks);
+    await viewModel.LoadAsync();
+
+    await viewModel.StartScheduledTaskCommand.ExecuteAsync();
+
+    Assert(scheduledTasks.Runs.Count == 0, "Missing scheduled task should not be started.");
+    Assert(viewModel.OutputText.Contains("missing query output", StringComparison.Ordinal), $"Expected query output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "No scheduled task is installed for this profile. Use Install Task or Run Now.", $"Unexpected status: {viewModel.Status.Text}");
+}
+
+static async Task StartScheduledTaskReportsRepairNeededWithoutRunning()
+{
+    var profile = ValidProfile();
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Ready,
+            string.Empty,
+            string.Empty,
+            0,
+            string.Empty)
+        {
+            NeedsRepair = true,
+            RepairReasons = ["Visible PowerShell action"]
+        }
+    };
+    var viewModel = CreateMainWindowViewModel([profile], scheduledTasks: scheduledTasks);
+    await viewModel.LoadAsync();
+
+    await viewModel.StartScheduledTaskCommand.ExecuteAsync();
+
+    Assert(scheduledTasks.Runs.Count == 0, "Repair-needed scheduled task should not be started.");
+    Assert(viewModel.OutputText.Contains("Visible PowerShell action", StringComparison.Ordinal), $"Expected repair reason output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Scheduled task needs repair before it can be started. Use Repair Task.", $"Unexpected status: {viewModel.Status.Text}");
+}
+
+static async Task RefreshStatusUpdatesTaskFieldsAndActionSurface()
+{
+    var profile = ValidProfile();
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Ready,
+            "6/3/2026 6:00:00 PM",
+            "6/2/2026 6:00:00 PM",
+            0,
+            string.Empty)
+    };
+    var inventory = new FakeScheduledTaskInventoryService();
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        scheduledTasks: scheduledTasks,
+        taskInventoryService: inventory);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    await viewModel.RefreshStatusCommand.ExecuteAsync();
+
+    Assert(viewModel.TaskNameText == ScheduledTaskName.ForProfile(profile), $"Unexpected task name: {viewModel.TaskNameText}");
+    Assert(viewModel.NextRunText == "6/3/2026 6:00:00 PM", $"Unexpected next run: {viewModel.NextRunText}");
+    Assert(viewModel.LastRunText == "6/2/2026 6:00:00 PM; result 0", $"Unexpected last run: {viewModel.LastRunText}");
+    Assert(viewModel.ActionSurface.ShowStartScheduledTask, "Expected ready task to be startable.");
+    Assert(viewModel.ActionSurface.ShowDisableTask, "Expected ready task to expose disable.");
+    Assert(viewModel.ActionSurface.InstallTaskLabel == "Update Task", $"Unexpected install label: {viewModel.ActionSurface.InstallTaskLabel}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected refresh status to refresh task inventory.");
+}
+
+static async Task ReviewTaskInventoryOpensRowsOrReportsNone()
+{
+    var profile = ValidProfile();
+    var item = new ScheduledTaskInventoryItem(
+        ScheduledTaskName.ForProfile(profile),
+        profile.Id,
+        profile.Name,
+        ScheduledTaskInventoryState.Ready,
+        ScheduledTaskState.Ready,
+        string.Empty,
+        string.Empty,
+        0,
+        "powershell.exe",
+        @"C:\Replicator\profile.ps1",
+        false,
+        [],
+        "Ready",
+        string.Empty);
+    var inventoryWithRows = new FakeScheduledTaskInventoryService
+    {
+        Result = new ScheduledTaskInventoryResult(
+            [item],
+            new ScheduledTaskInventorySummary(1, 1, 0, 0, 0, 0),
+            string.Empty)
+    };
+    var viewModelWithRows = CreateMainWindowViewModel(
+        [profile],
+        taskInventoryService: inventoryWithRows);
+    await viewModelWithRows.LoadAsync();
+
+    await viewModelWithRows.ReviewTaskInventoryCommand.ExecuteAsync();
+
+    Assert(viewModelWithRows.TaskInventory.IsReviewOpen, "Expected review surface to open when inventory rows exist.");
+
+    var emptyViewModel = CreateMainWindowViewModel([ValidProfile()]);
+    await emptyViewModel.LoadAsync();
+
+    await emptyViewModel.ReviewTaskInventoryCommand.ExecuteAsync();
+
+    Assert(!emptyViewModel.TaskInventory.IsReviewOpen, "Empty inventory should not open review.");
+    Assert(emptyViewModel.Status.Text == "No Replicator scheduled tasks were found.", $"Unexpected empty-inventory status: {emptyViewModel.Status.Text}");
+}
+
+static async Task RepairSelectedInventoryTaskInstallsProfileTask()
+{
+    var profile = ValidProfile();
+    var item = new ScheduledTaskInventoryItem(
+        ScheduledTaskName.ForProfile(profile),
+        profile.Id,
+        profile.Name,
+        ScheduledTaskInventoryState.NeedsRepair,
+        ScheduledTaskState.Ready,
+        string.Empty,
+        string.Empty,
+        0,
+        "powershell.exe",
+        @"C:\Replicator\profile.ps1",
+        true,
+        ["Visible PowerShell action"],
+        "Visible PowerShell action",
+        string.Empty);
+    var inventory = new FakeScheduledTaskInventoryService
+    {
+        Result = new ScheduledTaskInventoryResult(
+            [item],
+            new ScheduledTaskInventorySummary(1, 0, 1, 0, 0, 0),
+            string.Empty)
+    };
+    var scheduledTasks = new FakeScheduledTaskService
+    {
+        QueryResult = new ScheduledTaskSnapshot(
+            string.Empty,
+            ScheduledTaskState.Ready,
+            string.Empty,
+            string.Empty,
+            0,
+            string.Empty)
+    };
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        scheduledTasks: scheduledTasks,
+        taskInventoryService: inventory);
+    await viewModel.LoadAsync();
+    var initialScanCount = inventory.ScanCount;
+
+    await viewModel.RepairSelectedInventoryTaskCommand.ExecuteAsync();
+
+    Assert(scheduledTasks.Installs.Count == 1 && ReferenceEquals(scheduledTasks.Installs[0], profile), "Expected selected repair item to reinstall the profile task.");
+    Assert(viewModel.OutputText.Contains("install output", StringComparison.Ordinal), $"Expected install output, got: {viewModel.OutputText}");
+    Assert(viewModel.Status.Text == "Task installed.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(inventory.ScanCount == initialScanCount + 1, "Expected repair to refresh task inventory.");
+}
+
+static async Task MainWindowViewModelMarksDriveSecurityPermissionRequiredForElevation()
+{
+    var profile = ValidProfile();
+    profile.SourcePath = @"C:\work\scratch";
+    profile.Target.Path = @"D:\backups\scratch";
+    var provider = new FakeBitLockerStatusProvider();
+    provider.Items[@"C:\"] = new DriveSecurityItem(
+        "Source drive",
+        profile.SourcePath,
+        @"C:\",
+        DriveSecurityState.Protected,
+        DriveSecuritySeverity.Info,
+        @"Drive security: Source drive is BitLocker protected (C:\).");
+    provider.Items[@"D:\"] = new DriveSecurityItem(
+        "Target drive",
+        profile.Target.Path,
+        @"D:\",
+        DriveSecurityState.PermissionRequired,
+        DriveSecuritySeverity.Warning,
+        @"Drive security: Target drive needs an administrator check (D:\).");
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        driveSecurityProvider: provider);
+
+    await viewModel.LoadAsync();
+
+    Assert(viewModel.DriveSecurityRequiresElevation, "Expected permission-required drive security to request elevation.");
+    Assert(viewModel.ActionSurface.ShowElevatedDriveSecurity, "Expected action surface to show elevated drive security command.");
+    Assert(viewModel.DriveSecurityText.Contains("Check as Admin", StringComparison.OrdinalIgnoreCase), $"Unexpected drive security text: {viewModel.DriveSecurityText}");
+}
+
+static async Task CheckDriveSecurityAsAdminRefreshesSelectedProfileElevationState()
+{
+    var profile = ValidProfile();
+    profile.SourcePath = @"C:\work\scratch";
+    profile.Target.Path = @"D:\backups\scratch";
+    var provider = new FakeBitLockerStatusProvider();
+    provider.Items[@"C:\"] = new DriveSecurityItem(
+        "Source drive",
+        profile.SourcePath,
+        @"C:\",
+        DriveSecurityState.Protected,
+        DriveSecuritySeverity.Info,
+        @"Drive security: Source drive is BitLocker protected (C:\).");
+    provider.Items[@"D:\"] = new DriveSecurityItem(
+        "Target drive",
+        profile.Target.Path,
+        @"D:\",
+        DriveSecurityState.PermissionRequired,
+        DriveSecuritySeverity.Warning,
+        @"Drive security: Target drive needs elevated permissions (D:\).");
+    var elevatedProvider = new FakeBitLockerStatusProvider();
+    elevatedProvider.Items[@"C:\"] = provider.Items[@"C:\"];
+    elevatedProvider.Items[@"D:\"] = new DriveSecurityItem(
+        "Target drive",
+        profile.Target.Path,
+        @"D:\",
+        DriveSecurityState.Protected,
+        DriveSecuritySeverity.Info,
+        @"Drive security: Target drive is BitLocker protected (D:\).");
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        driveSecurityProvider: provider,
+        elevatedDriveSecurityProvider: elevatedProvider);
+    await viewModel.LoadAsync();
+
+    await viewModel.CheckDriveSecurityAsAdminCommand.ExecuteAsync();
+
+    Assert(!viewModel.DriveSecurityRequiresElevation, "Expected elevated refresh to clear elevation requirement.");
+    Assert(!viewModel.ActionSurface.ShowElevatedDriveSecurity, "Expected action surface to hide elevated drive security command.");
+    Assert(viewModel.DriveSecurityText == "Drive security: checked local profile drives.", $"Unexpected drive security text: {viewModel.DriveSecurityText}");
+}
+
+static async Task PrepareShuttleCommandRunsDryRunAndReportsResult()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    Directory.CreateDirectory(source);
+    await File.WriteAllTextAsync(Path.Combine(source, "note.md"), "hello");
+
+    var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+    profile.DryRun = true;
+    var store = new FakeProfileStore([profile]);
+    var viewModel = CreateMainWindowViewModel(profileStore: store);
+    await viewModel.LoadAsync();
+
+    await viewModel.PrepareShuttleCommand.ExecuteAsync();
+
+    Assert(store.Upserts.Count == 1 && ReferenceEquals(store.Upserts[0], profile), "Expected prepare shuttle to persist the selected profile.");
+    Assert(viewModel.Status.Text == "Prepare Shuttle dry run completed. Uncheck Dry run to write the shuttle payload.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.OutputText.Contains("Would stage note.md", StringComparison.Ordinal), $"Expected dry-run details, got: {viewModel.OutputText}");
+    Assert(viewModel.ActionSurface.ShowPrepareShuttle, "Expected shuttle action surface to remain visible.");
+}
+
+static async Task DepartShuttleCommandMarksPreparedPayloadReady()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    Directory.CreateDirectory(source);
+    await File.WriteAllTextAsync(Path.Combine(source, "note.md"), "hello");
+
+    var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+    profile.DryRun = false;
+    var viewModel = CreateMainWindowViewModel([profile]);
+    await viewModel.LoadAsync();
+    await viewModel.PrepareShuttleCommand.ExecuteAsync();
+
+    await viewModel.DepartShuttleCommand.ExecuteAsync();
+
+    Assert(viewModel.Status.Text.Contains("Departed from", StringComparison.Ordinal), $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.OutputText.Contains("ready to dock", StringComparison.OrdinalIgnoreCase), $"Expected departed output, got: {viewModel.OutputText}");
+}
+
+static async Task DockShuttleCommandReportsNoInboundChanges()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    Directory.CreateDirectory(source);
+
+    var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+    var viewModel = CreateMainWindowViewModel([profile]);
+    await viewModel.LoadAsync();
+
+    await viewModel.DockShuttleCommand.ExecuteAsync();
+
+    Assert(viewModel.Status.Text == "No inbound shuttle changes are waiting for this machine.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.OutputText.Contains("No inbound shuttle changes", StringComparison.Ordinal), $"Expected no-inbound output, got: {viewModel.OutputText}");
+}
+
+static async Task ReceiveShuttleCommandReportsNoInboundChanges()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var shuttleRoot = Path.Combine(root, "external", "Replicator", "shuttle", "repo");
+    Directory.CreateDirectory(source);
+
+    var profile = ValidShuttleProfile(Guid.NewGuid(), source, shuttleRoot);
+    var viewModel = CreateMainWindowViewModel([profile]);
+    await viewModel.LoadAsync();
+
+    await viewModel.ReceiveShuttleCommand.ExecuteAsync();
+
+    Assert(viewModel.Status.Text == "No inbound shuttle changes are waiting for this machine.", $"Unexpected status: {viewModel.Status.Text}");
+    Assert(viewModel.OutputText.Contains("No inbound shuttle changes", StringComparison.Ordinal), $"Expected no-inbound output, got: {viewModel.OutputText}");
+}
+
+static async Task BusyOperationDisablesMutationAndRestoresActionSurface()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var source = Path.Combine(root, "source");
+    var target = Path.Combine(root, "target");
+    Directory.CreateDirectory(source);
+    Directory.CreateDirectory(target);
+
+    var profile = ValidProfile();
+    profile.SourcePath = source;
+    profile.Target.Path = target;
+    profile.DryRun = false;
+    var processRunner = new BlockingProcessRunner();
+    var viewModel = CreateMainWindowViewModel(
+        [profile],
+        processRunner: processRunner);
+    await viewModel.LoadAsync();
+
+    var runTask = viewModel.RunNowCommand.ExecuteAsync();
+    await processRunner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+    Assert(viewModel.IsBusy, "Expected view model to be busy while Run Now is in flight.");
+    Assert(!viewModel.ActionSurface.CanMutateProfile, "Busy operation should disable profile mutation.");
+    Assert(viewModel.Status.Text == "Running profile now...", $"Unexpected busy status: {viewModel.Status.Text}");
+
+    processRunner.Complete(new ProcessResult(0, "busy run output", string.Empty));
+    await runTask;
+
+    Assert(!viewModel.IsBusy, "Expected busy state to clear after operation completes.");
+    Assert(viewModel.ActionSurface.CanMutateProfile, "Expected profile mutation to be restored after operation completes.");
+    Assert(viewModel.OutputText.Contains("busy run output", StringComparison.Ordinal), $"Expected process output, got: {viewModel.OutputText}");
+}
+
+static async Task CancelOperationCommandIsDisabledWhenIdle()
+{
+    var viewModel = CreateMainWindowViewModel([ValidProfile()]);
+    await viewModel.LoadAsync();
+
+    Assert(!viewModel.CanCancel, "Expected idle view model to report no cancellable operation.");
+    Assert(!viewModel.CancelOperationCommand.CanExecute(null), "Expected cancel command to be disabled while idle.");
 }
 
 static Task ValidatorRejectsNestedDestination()
@@ -2328,6 +3083,199 @@ static IReadOnlyList<string> BuildScheduledTaskArguments(BackupProfile profile)
     return (IReadOnlyList<string>)method.Invoke(null, [profile, @"C:\Replicator\profile.ps1", ScheduledTaskName.ForProfile(profile)])!;
 }
 
+static Replicator.Presentation.ViewModels.MainWindowViewModel CreateMainWindowViewModel(
+    IReadOnlyList<BackupProfile>? profiles = null,
+    FakeProfileStore? profileStore = null,
+    FakeScheduledTaskService? scheduledTasks = null,
+    FakeScheduledTaskInventoryService? taskInventoryService = null,
+    FakeFolderPicker? folderPicker = null,
+    FakeUserConfirmation? confirmation = null,
+    IProcessRunner? processRunner = null,
+    FakeBitLockerStatusProvider? driveSecurityProvider = null,
+    FakeBitLockerStatusProvider? elevatedDriveSecurityProvider = null)
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var paths = new ReplicatorPaths(root);
+    paths.EnsureCreated();
+
+    return new Replicator.Presentation.ViewModels.MainWindowViewModel(
+        paths,
+        profileStore ?? new FakeProfileStore(profiles ?? []),
+        new ProfileAvailabilityChecker(),
+        driveSecurityProvider ?? new FakeBitLockerStatusProvider(),
+        elevatedDriveSecurityProvider ?? new FakeBitLockerStatusProvider(),
+        new ProfileDriveSecurityCache(),
+        new PowerShellScriptGenerator(paths.ScriptsDirectory, paths.LogsDirectory),
+        new BackupLogReader(paths.LogsDirectory),
+        new BackupRunStatusReader(paths.LogsDirectory),
+        new ShuttleService(new MachineIdentity("test-machine", "Test Machine")),
+        processRunner ?? new ProcessRunner(),
+        scheduledTasks ?? new FakeScheduledTaskService(),
+        taskInventoryService ?? new FakeScheduledTaskInventoryService(),
+        folderPicker ?? new FakeFolderPicker(),
+        confirmation ?? new FakeUserConfirmation());
+}
+
+sealed class FakeProfileStore(IReadOnlyList<BackupProfile> profiles) : IProfileStore
+{
+    public List<BackupProfile> Profiles { get; } = profiles.ToList();
+
+    public List<BackupProfile> Upserts { get; } = [];
+
+    public List<Guid> Deletes { get; } = [];
+
+    public Task<IReadOnlyList<BackupProfile>> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult((IReadOnlyList<BackupProfile>)Profiles);
+    }
+
+    public Task SaveAllAsync(IEnumerable<BackupProfile> profiles, CancellationToken cancellationToken = default)
+    {
+        Profiles.Clear();
+        Profiles.AddRange(profiles);
+        return Task.CompletedTask;
+    }
+
+    public Task UpsertAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    {
+        Upserts.Add(profile);
+        var index = Profiles.FindIndex(existing => existing.Id == profile.Id);
+        if (index >= 0)
+        {
+            Profiles[index] = profile;
+        }
+        else
+        {
+            Profiles.Add(profile);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(Guid profileId, CancellationToken cancellationToken = default)
+    {
+        Deletes.Add(profileId);
+        Profiles.RemoveAll(profile => profile.Id == profileId);
+        return Task.CompletedTask;
+    }
+}
+
+sealed class FakeScheduledTaskService : IScheduledTaskService
+{
+    public List<BackupProfile> Installs { get; } = [];
+
+    public string LastInstallScriptPath { get; private set; } = string.Empty;
+
+    public List<BackupProfile> Runs { get; } = [];
+
+    public List<BackupProfile> Enables { get; } = [];
+
+    public List<BackupProfile> Disables { get; } = [];
+
+    public List<BackupProfile> Deletes { get; } = [];
+
+    public ScheduledTaskSnapshot QueryResult { get; set; } = new(
+        string.Empty,
+        ScheduledTaskState.Missing,
+        string.Empty,
+        string.Empty,
+        0,
+        string.Empty);
+
+    public Task<TaskOperationResult> InstallOrUpdateAsync(
+        BackupProfile profile,
+        string scriptPath,
+        CancellationToken cancellationToken = default)
+    {
+        Installs.Add(profile);
+        LastInstallScriptPath = scriptPath;
+        return Task.FromResult(new TaskOperationResult(true, "Task installed.", "install output"));
+    }
+
+    public Task<TaskOperationResult> RunAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    {
+        Runs.Add(profile);
+        return Task.FromResult(new TaskOperationResult(true, "Task started.", "run output"));
+    }
+
+    public Task<TaskOperationResult> EnableAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    {
+        Enables.Add(profile);
+        return Task.FromResult(new TaskOperationResult(true, "Task enabled.", "enable output"));
+    }
+
+    public Task<TaskOperationResult> DisableAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    {
+        Disables.Add(profile);
+        return Task.FromResult(new TaskOperationResult(true, "Task disabled.", "disable output"));
+    }
+
+    public Task<TaskOperationResult> DeleteAsync(BackupProfile profile, CancellationToken cancellationToken = default)
+    {
+        Deletes.Add(profile);
+        return Task.FromResult(new TaskOperationResult(true, "Task deleted.", "delete output"));
+    }
+
+    public Task<ScheduledTaskSnapshot> QueryAsync(
+        BackupProfile profile,
+        string? expectedScriptPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(QueryResult with { TaskName = ScheduledTaskName.ForProfile(profile) });
+    }
+}
+
+sealed class FakeScheduledTaskInventoryService : IScheduledTaskInventoryService
+{
+    public ScheduledTaskInventoryResult Result { get; set; } = new(
+        [],
+        new ScheduledTaskInventorySummary(0, 0, 0, 0, 0, 0),
+        string.Empty);
+
+    public int ScanCount { get; private set; }
+
+    public IReadOnlyList<BackupProfile> LastProfiles { get; private set; } = [];
+
+    public IReadOnlyDictionary<Guid, string> LastExpectedScriptPaths { get; private set; } = new Dictionary<Guid, string>();
+
+    public Task<ScheduledTaskInventoryResult> ScanAsync(
+        IReadOnlyList<BackupProfile> profiles,
+        IReadOnlyDictionary<Guid, string> expectedScriptPaths,
+        CancellationToken cancellationToken = default)
+    {
+        ScanCount++;
+        LastProfiles = profiles.ToList();
+        LastExpectedScriptPaths = new Dictionary<Guid, string>(expectedScriptPaths);
+        return Task.FromResult(Result);
+    }
+}
+
+sealed class FakeFolderPicker : Replicator.Presentation.Services.IFolderPicker
+{
+    public Queue<string?> Results { get; } = [];
+
+    public List<string> InitialPaths { get; } = [];
+
+    public Task<string?> PickFolderAsync(string initialPath, CancellationToken cancellationToken = default)
+    {
+        InitialPaths.Add(initialPath);
+        return Task.FromResult(Results.Count > 0 ? Results.Dequeue() : null);
+    }
+}
+
+sealed class FakeUserConfirmation : Replicator.Presentation.Services.IUserConfirmation
+{
+    public Queue<bool> Results { get; } = [];
+
+    public List<string> Titles { get; } = [];
+
+    public Task<bool> ConfirmAsync(string title, string message, string confirmText, string cancelText)
+    {
+        Titles.Add(title);
+        return Task.FromResult(Results.Count > 0 && Results.Dequeue());
+    }
+}
+
 sealed class FakeBitLockerStatusProvider : IBitLockerStatusProvider
 {
     public Dictionary<string, DriveSecurityItem> Items { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -2365,6 +3313,8 @@ sealed class CountingBitLockerStatusProvider : IBitLockerStatusProvider
 
 sealed class FakeProcessRunner(ProcessResult result) : IProcessRunner
 {
+    public string LastFileName { get; private set; } = string.Empty;
+
     public IReadOnlyList<string> LastArguments { get; private set; } = [];
 
     public Task<ProcessResult> RunAsync(
@@ -2372,8 +3322,30 @@ sealed class FakeProcessRunner(ProcessResult result) : IProcessRunner
         IEnumerable<string> arguments,
         CancellationToken cancellationToken = default)
     {
+        LastFileName = fileName;
         LastArguments = arguments.ToList();
         return Task.FromResult(result);
+    }
+}
+
+sealed class BlockingProcessRunner : IProcessRunner
+{
+    private readonly TaskCompletionSource<ProcessResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Task<ProcessResult> RunAsync(
+        string fileName,
+        IEnumerable<string> arguments,
+        CancellationToken cancellationToken = default)
+    {
+        Started.TrySetResult(true);
+        return _completion.Task.WaitAsync(cancellationToken);
+    }
+
+    public void Complete(ProcessResult result)
+    {
+        _completion.TrySetResult(result);
     }
 }
 
