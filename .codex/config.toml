@@ -1,0 +1,18 @@
+# Project-scoped Codex config for Replicator. Loaded only when this project is TRUSTED in Codex.
+# Wires the CodeGraphContext MCP server (remote FalkorDB backend) for this repo, pinned to its own
+# named graph so queries don't bleed across repos. Same pwsh launcher Claude uses; the FalkorDB
+# password is pulled from Windows Credential Manager by the launcher (never stored here).
+[mcp_servers.codegraphcontext]
+command = "pwsh"
+args = ["-NoProfile", "-NonInteractive", "-File", "D:\\repos\\personal\\dotfiles\\codegraphcontext\\scripts\\Start-CodeGraphContextMCP.ps1"]
+startup_timeout_sec = 120
+
+[mcp_servers.codegraphcontext.env]
+CGC_RUNTIME_DB_TYPE = "falkordb-remote"
+DEFAULT_DATABASE = "falkordb-remote"
+FALKORDB_HOST = "localhost"
+FALKORDB_PORT = "6379"
+FALKORDB_GRAPH_NAME = "replicator"
+INDEX_SOURCE = "true"
+FUZZY_SEARCH = "true"
+IGNORE_DIRS = "node_modules,venv,.venv,env,.env,.conda,dist,build,bin,obj,artifacts,target,out,.git,.idea,.vscode,.vs,__pycache__"

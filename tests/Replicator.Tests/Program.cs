@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Xml.Linq;
 using Replicator.Core.Execution;
@@ -16,6 +17,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("validator rejects destinations under the source tree", ValidatorRejectsNestedDestination),
     ("script generator emits robocopy dry-run script", ScriptGeneratorEmitsDryRunScript),
     ("script generator emits target preflight status", ScriptGeneratorEmitsTargetPreflightStatus),
+    ("script generator writes hidden scheduled task launcher", ScriptGeneratorWritesHiddenScheduledTaskLauncher),
     ("log reader summarizes latest robocopy log", LogReaderSummarizesLatestRobocopyLog),
     ("log reader skips locked latest robocopy log", LogReaderSkipsLockedLatestRobocopyLog),
     ("status reader parses latest backup status", StatusReaderParsesLatestBackupStatus),
@@ -33,12 +35,14 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("shuttle prepare expands environment variable source path", ShuttlePrepareExpandsEnvironmentVariableSourcePath),
     ("shuttle metadata operations block missing source", ShuttleMetadataOperationsBlockMissingSource),
     ("scheduled task names are deterministic and scoped", ScheduledTaskNamesAreScoped),
-    ("scheduled task action runs hidden noninteractive powershell", ScheduledTaskActionRunsHiddenNonInteractivePowerShell),
+    ("scheduled task action uses hidden windowless launcher", ScheduledTaskActionUsesHiddenWindowlessLauncher),
     ("scheduled task action inspector flags visible powershell actions", ScheduledTaskActionInspectorFlagsVisiblePowerShellActions),
+    ("scheduled task action inspector flags console powershell actions even when hidden", ScheduledTaskActionInspectorFlagsConsolePowerShellActionsEvenWhenHidden),
     ("scheduled task action inspector flags mismatched script paths", ScheduledTaskActionInspectorFlagsMismatchedScriptPaths),
     ("scheduled task query reports repair reasons", ScheduledTaskQueryReportsRepairReasons),
     ("scheduled task inventory classifies matched repair and orphaned tasks", ScheduledTaskInventoryClassifiesMatchedRepairAndOrphanedTasks),
     ("scheduled task inventory disables repair for running tasks", ScheduledTaskInventoryDisablesRepairForRunningTasks),
+    ("scheduled task issue selector ignores other profile repairs", ScheduledTaskIssueSelectorIgnoresOtherProfileRepairs),
     ("scheduled task inventory reports query failure as unknown", ScheduledTaskInventoryReportsQueryFailureAsUnknown),
     ("main window status text is layout bounded", MainWindowStatusTextIsLayoutBounded),
     ("minute schedules emit schtasks minute cadence", MinuteSchedulesEmitSchtasksMinuteCadence),
@@ -52,8 +56,14 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("drive security report treats permission required as a warning", DriveSecurityReportTreatsPermissionRequiredAsWarning),
     ("drive security report marks permission required checks as elevation ready", DriveSecurityReportMarksPermissionRequiredChecksAsElevationReady),
     ("drive security cache warms unique roots across profiles", DriveSecurityCacheWarmsUniqueRootsAcrossProfiles),
-    ("elevated bitlocker provider launches hidden admin powershell and parses result file", ElevatedBitLockerProviderLaunchesHiddenAdminPowerShellAndParsesResultFile),
+    ("drive security cache refreshes selected profile roots only", DriveSecurityCacheRefreshesSelectedProfileRootsOnly),
+    ("drive security cache preserves unknown check failure reason", DriveSecurityCachePreservesUnknownCheckFailureReason),
+    ("elevated bitlocker provider launches windowless admin helper and parses result file", ElevatedBitLockerProviderLaunchesWindowlessAdminHelperAndParsesResultFile),
+    ("elevated bitlocker launcher runs helper through wscript", ElevatedBitLockerLauncherRunsHelperThroughWScript),
     ("elevated bitlocker provider batches multiple roots into one admin launch", ElevatedBitLockerProviderBatchesMultipleRootsIntoOneAdminLaunch),
+    ("elevated bitlocker helper script enumerates Windows PowerShell JSON requests", ElevatedBitLockerHelperScriptEnumeratesWindowsPowerShellJsonRequests),
+    ("elevated bitlocker helper script writes output for startup failures", ElevatedBitLockerHelperScriptWritesOutputForStartupFailures),
+    ("elevated bitlocker provider times out hung admin helper", ElevatedBitLockerProviderTimesOutHungAdminHelper),
     ("elevated bitlocker provider treats canceled admin prompt as permission required", ElevatedBitLockerProviderTreatsCanceledAdminPromptAsPermissionRequired),
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
@@ -135,6 +145,33 @@ static Task ScriptGeneratorEmitsTargetPreflightStatus()
         "Expected target preflight before robocopy.");
 
     return Task.CompletedTask;
+}
+
+static async Task ScriptGeneratorWritesHiddenScheduledTaskLauncher()
+{
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var generator = new PowerShellScriptGenerator(Path.Combine(root, "scripts"), Path.Combine(root, "logs"));
+
+    try
+    {
+        var script = await generator.WriteAsync(ValidProfile());
+        var launcherPath = Path.ChangeExtension(script.Path, ".vbs");
+
+        Assert(File.Exists(launcherPath), $"Expected hidden scheduled task launcher at {launcherPath}.");
+
+        var launcher = await File.ReadAllTextAsync(launcherPath);
+        Assert(launcher.Contains("WScript.Shell", StringComparison.Ordinal), "Expected launcher to use the windowless WScript host.");
+        Assert(launcher.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase), "Expected launcher to hide PowerShell.");
+        Assert(launcher.Contains(script.Path, StringComparison.OrdinalIgnoreCase), "Expected launcher to invoke the generated PowerShell script.");
+        Assert(launcher.Contains("shell.Run(command, 0, True)", StringComparison.Ordinal), "Expected launcher to wait for the hidden PowerShell process.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
 
 static Task LogReaderSummarizesLatestRobocopyLog()
@@ -921,7 +958,7 @@ static Task ScheduledTaskNamesAreScoped()
     return Task.CompletedTask;
 }
 
-static Task ScheduledTaskActionRunsHiddenNonInteractivePowerShell()
+static Task ScheduledTaskActionUsesHiddenWindowlessLauncher()
 {
     var profile = ValidProfile();
     var arguments = BuildScheduledTaskArguments(profile);
@@ -929,11 +966,13 @@ static Task ScheduledTaskActionRunsHiddenNonInteractivePowerShell()
     Assert(taskRunIndex >= 0 && taskRunIndex + 1 < arguments.Count, "Expected scheduled task run command.");
 
     var taskRunCommand = arguments[taskRunIndex + 1];
+    var expectedLauncher = Path.ChangeExtension(@"C:\Replicator\profile.ps1", ".vbs");
 
-    Assert(taskRunCommand.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase), $"Expected hidden PowerShell window style: {taskRunCommand}");
-    Assert(taskRunCommand.Contains("-NonInteractive", StringComparison.OrdinalIgnoreCase), $"Expected non-interactive PowerShell execution: {taskRunCommand}");
-    Assert(taskRunCommand.Contains("-ExecutionPolicy Bypass", StringComparison.OrdinalIgnoreCase), $"Expected execution policy bypass: {taskRunCommand}");
-    Assert(taskRunCommand.Contains("-File ", StringComparison.OrdinalIgnoreCase), $"Expected generated script file invocation: {taskRunCommand}");
+    Assert(taskRunCommand.StartsWith("wscript.exe ", StringComparison.OrdinalIgnoreCase), $"Expected scheduled task to use windowless WScript host: {taskRunCommand}");
+    Assert(taskRunCommand.Contains("//B", StringComparison.OrdinalIgnoreCase), $"Expected WScript batch mode: {taskRunCommand}");
+    Assert(taskRunCommand.Contains("//Nologo", StringComparison.OrdinalIgnoreCase), $"Expected WScript nologo mode: {taskRunCommand}");
+    Assert(taskRunCommand.Contains($"\"{expectedLauncher}\"", StringComparison.OrdinalIgnoreCase), $"Expected launcher path in task action: {taskRunCommand}");
+    Assert(!taskRunCommand.Contains("powershell.exe", StringComparison.OrdinalIgnoreCase), $"Expected scheduled task action not to start console PowerShell directly: {taskRunCommand}");
     return Task.CompletedTask;
 }
 
@@ -953,6 +992,33 @@ static Task ScheduledTaskActionInspectorFlagsVisiblePowerShellActions()
         Assert(health.ScriptExists, "Expected script to exist.");
         Assert(health.RepairReasons.Any(reason => reason.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase)), "Expected hidden-window repair reason.");
         Assert(health.RepairReasons.Any(reason => reason.Contains("-NonInteractive", StringComparison.OrdinalIgnoreCase)), "Expected noninteractive repair reason.");
+    }
+    finally
+    {
+        if (File.Exists(scriptPath))
+        {
+            File.Delete(scriptPath);
+        }
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task ScheduledTaskActionInspectorFlagsConsolePowerShellActionsEvenWhenHidden()
+{
+    var scriptPath = Path.Combine(Path.GetTempPath(), $"replicator-{Guid.NewGuid():N}.ps1");
+    File.WriteAllText(scriptPath, "# test");
+
+    try
+    {
+        var action = $"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{scriptPath}\"";
+
+        var health = ScheduledTaskActionInspector.Inspect(action, scriptPath);
+
+        Assert(health.NeedsRepair, "Expected console PowerShell action to need repair even when it asks for a hidden window.");
+        Assert(health.ScriptPath == scriptPath, $"Unexpected script path: {health.ScriptPath}");
+        Assert(health.ScriptExists, "Expected script to exist.");
+        Assert(health.RepairReasons.Any(reason => reason.Contains("windowless launcher", StringComparison.OrdinalIgnoreCase)), "Expected windowless-launcher repair reason.");
     }
     finally
     {
@@ -1118,6 +1184,53 @@ Task To Run:                          powershell.exe -NoProfile -NonInteractive 
             File.Delete(script);
         }
     }
+}
+
+static Task ScheduledTaskIssueSelectorIgnoresOtherProfileRepairs()
+{
+    var selectedProfileId = Guid.NewGuid();
+    var repairProfileId = Guid.NewGuid();
+    var selectedReady = new ScheduledTaskInventoryItem(
+        @"\Replicator\Selected-Profile",
+        selectedProfileId,
+        "Selected Profile",
+        ScheduledTaskInventoryState.Ready,
+        ScheduledTaskState.Ready,
+        "6/1/2026 2:00:00 PM",
+        "6/1/2026 1:00:00 PM",
+        0,
+        "wscript.exe //B //Nologo \"C:\\Replicator\\selected.vbs\"",
+        @"C:\Replicator\selected.ps1",
+        true,
+        [],
+        "Task action is current.",
+        string.Empty);
+    var otherRepair = new ScheduledTaskInventoryItem(
+        @"\Replicator\Other-Profile",
+        repairProfileId,
+        "Other Profile",
+        ScheduledTaskInventoryState.NeedsRepair,
+        ScheduledTaskState.Ready,
+        "6/1/2026 2:00:00 PM",
+        "6/1/2026 1:00:00 PM",
+        0,
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Replicator\\other.ps1\"",
+        @"C:\Replicator\other.ps1",
+        true,
+        ["Task action uses the console PowerShell host; repair to the windowless launcher."],
+        "Task action uses the console PowerShell host; repair to the windowless launcher.",
+        string.Empty);
+    var inventory = new ScheduledTaskInventoryResult(
+        [selectedReady, otherRepair],
+        new ScheduledTaskInventorySummary(2, 1, 1, 0, 0, 0),
+        string.Empty);
+
+    var selectedIssue = ScheduledTaskInventoryIssueSelector.ForProfile(inventory, selectedProfileId);
+    var repairIssue = ScheduledTaskInventoryIssueSelector.ForProfile(inventory, repairProfileId);
+
+    Assert(selectedIssue is null, "Selected ready profile should not show a repair flag because another profile needs repair.");
+    Assert(repairIssue == otherRepair, "Expected repair issue only when the repairable profile is selected.");
+    return Task.CompletedTask;
 }
 
 static async Task ScheduledTaskInventoryReportsQueryFailureAsUnknown()
@@ -1402,7 +1515,70 @@ static async Task DriveSecurityCacheWarmsUniqueRootsAcrossProfiles()
     Assert(provider.Calls.Count == 3, $"Expected cached roots to avoid repeat checks, got {provider.Calls.Count} calls.");
 }
 
-static async Task ElevatedBitLockerProviderLaunchesHiddenAdminPowerShellAndParsesResultFile()
+static async Task DriveSecurityCacheRefreshesSelectedProfileRootsOnly()
+{
+    var selected = ValidProfile();
+    selected.SourcePath = @"D:\repos\personal";
+    selected.Target.Path = @"H:\dev\personal";
+
+    var other = ValidProfile();
+    other.SourcePath = @"F:\work";
+    other.Target.Path = @"H:\work";
+
+    var provider = new CountingBitLockerStatusProvider();
+    provider.Results[@"D:\"] = new DriveSecurityItem(
+        "Cached drive",
+        @"D:\",
+        @"D:\",
+        DriveSecurityState.Unprotected,
+        DriveSecuritySeverity.Warning,
+        @"Drive security: Cached drive is not BitLocker protected (D:\).");
+    provider.Results[@"H:\"] = new DriveSecurityItem(
+        "Cached drive",
+        @"H:\",
+        @"H:\",
+        DriveSecurityState.Unprotected,
+        DriveSecuritySeverity.Warning,
+        @"Drive security: Cached drive is not BitLocker protected (H:\).");
+    provider.Results[@"F:\"] = new DriveSecurityItem(
+        "Cached drive",
+        @"F:\",
+        @"F:\",
+        DriveSecurityState.Protected,
+        DriveSecuritySeverity.Info,
+        @"Drive security: Cached drive is BitLocker protected (F:\).");
+
+    var cache = new ProfileDriveSecurityCache();
+
+    await cache.RefreshAsync(selected, provider);
+
+    Assert(provider.Calls.SequenceEqual([@"D:\", @"H:\"], StringComparer.OrdinalIgnoreCase), $"Expected only selected profile roots, got {string.Join(", ", provider.Calls)}.");
+}
+
+static async Task DriveSecurityCachePreservesUnknownCheckFailureReason()
+{
+    var profile = ValidProfile();
+    profile.SourcePath = @"D:\repos\personal";
+    profile.Target.Path = @"D:\backups\personal";
+
+    var provider = new FakeBitLockerStatusProvider();
+    provider.Items[@"D:\"] = new DriveSecurityItem(
+        "Source drive",
+        profile.SourcePath,
+        @"D:\",
+        DriveSecurityState.Unknown,
+        DriveSecuritySeverity.Warning,
+        @"Drive security: Source drive BitLocker status unknown (D:\). Elevated BitLocker status check failed with exit code 1.");
+
+    var cache = new ProfileDriveSecurityCache();
+
+    await cache.RefreshAsync([profile], provider);
+    var report = cache.Report(profile);
+
+    Assert(report.Summary.Contains("exit code 1", StringComparison.OrdinalIgnoreCase), $"Expected unknown failure reason to be preserved: {report.Summary}");
+}
+
+static async Task ElevatedBitLockerProviderLaunchesWindowlessAdminHelperAndParsesResultFile()
 {
     if (!OperatingSystem.IsWindows())
     {
@@ -1416,10 +1592,21 @@ static async Task ElevatedBitLockerProviderLaunchesHiddenAdminPowerShellAndParse
     {
         var runner = new FakeElevatedProcessRunner(arguments =>
         {
-            var outputIndex = arguments.ToList().IndexOf("-OutputPath");
-            Assert(outputIndex >= 0 && outputIndex + 1 < arguments.Count, "Expected elevated helper output path argument.");
-            File.WriteAllText(arguments[outputIndex + 1], """
-                {"Succeeded":true,"MountPoint":"D:","VolumeStatus":"FullyEncrypted","ProtectionStatus":"On","LockStatus":"Unlocked","EncryptionPercentage":100}
+            var launcherPath = arguments.FirstOrDefault(argument => argument.EndsWith(".vbs", StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("Expected elevated launch to run the windowless script host helper.");
+
+            var launcher = File.ReadAllText(launcherPath);
+            Assert(launcher.Contains("shell.Run(command, 0, True)", StringComparison.OrdinalIgnoreCase), "Expected helper to wait for a hidden PowerShell process.");
+            Assert(launcher.Contains("-WindowStyle Hidden", StringComparison.OrdinalIgnoreCase), "Expected helper to hide PowerShell.");
+            Assert(launcher.Contains("-RequestsPath", StringComparison.OrdinalIgnoreCase), "Expected helper to pass request file path.");
+            Assert(launcher.Contains("-OutputPath", StringComparison.OrdinalIgnoreCase), "Expected helper to pass output file path.");
+
+            var requestPath = FindElevatedRequestPath(root);
+            var requestsJson = File.ReadAllText(requestPath);
+            Assert(requestsJson.Contains(@"""Root"":""D:\\""", StringComparison.Ordinal), $"Expected request file to contain D root: {requestsJson}");
+
+            File.WriteAllText(OutputPathFromRequestPath(requestPath), """
+                {"Root":"D:\\","Succeeded":true,"MountPoint":"D:","VolumeStatus":"FullyEncrypted","ProtectionStatus":"On","LockStatus":"Unlocked","EncryptionPercentage":100}
                 """);
 
             return Task.FromResult(0);
@@ -1431,11 +1618,58 @@ static async Task ElevatedBitLockerProviderLaunchesHiddenAdminPowerShellAndParse
             @"D:\");
 
         Assert(item.State == DriveSecurityState.Protected, $"Expected protected state, got {item.State}.");
-        Assert(runner.LastFileName.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase), $"Unexpected elevated file: {runner.LastFileName}");
-        Assert(runner.LastArguments.Contains("-WindowStyle"), "Expected hidden window style switch.");
-        Assert(runner.LastArguments.Contains("Hidden"), "Expected hidden PowerShell window.");
-        Assert(runner.LastArguments.Contains("-File"), "Expected elevated helper script to run via -File.");
-        Assert(runner.LastArguments.Contains("-RequestsJson"), "Expected batched requests JSON argument.");
+        Assert(runner.LastFileName.Equals("wscript.exe", StringComparison.OrdinalIgnoreCase), $"Unexpected elevated file: {runner.LastFileName}");
+        Assert(runner.LastArguments.Contains("//B"), "Expected script host to run in batch mode.");
+        Assert(runner.LastArguments.Contains("//Nologo"), "Expected script host to suppress logo output.");
+        Assert(runner.LastArguments.Any(argument => argument.EndsWith(".vbs", StringComparison.OrdinalIgnoreCase)), "Expected elevated helper launcher argument.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ElevatedBitLockerLauncherRunsHelperThroughWScript()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var scriptPath = Path.Combine(root, "helper.ps1");
+        var requestsPath = Path.Combine(root, "requests.json");
+        var outputPath = Path.Combine(root, "output.json");
+        var launcherPath = Path.Combine(root, "helper.vbs");
+
+        await File.WriteAllTextAsync(scriptPath, """
+            param(
+                [Parameter(Mandatory = $true)]
+                [string]$RequestsPath,
+
+                [Parameter(Mandatory = $true)]
+                [string]$OutputPath
+            )
+
+            Set-Content -LiteralPath $OutputPath -Encoding UTF8 -Value "ok:$RequestsPath"
+            exit 0
+            """);
+        await File.WriteAllTextAsync(requestsPath, """[{"Root":"D:\\"}]""");
+        await File.WriteAllTextAsync(launcherPath, BuildElevatedBitLockerLauncherScript(scriptPath, requestsPath, outputPath));
+
+        var result = await RunWScriptAsync(launcherPath);
+
+        Assert(result.ExitCode == 0, $"Expected launcher success. stdout: {result.StandardOutput} stderr: {result.StandardError}");
+        Assert(File.Exists(outputPath), "Expected VBS launcher to run PowerShell helper and write output.");
+        var output = await File.ReadAllTextAsync(outputPath);
+        Assert(output.Contains(requestsPath, StringComparison.OrdinalIgnoreCase), $"Expected helper to receive request path, got: {output}");
     }
     finally
     {
@@ -1460,9 +1694,12 @@ static async Task ElevatedBitLockerProviderBatchesMultipleRootsIntoOneAdminLaunc
     {
         var runner = new FakeElevatedProcessRunner(arguments =>
         {
-            var outputIndex = arguments.ToList().IndexOf("-OutputPath");
-            Assert(outputIndex >= 0 && outputIndex + 1 < arguments.Count, "Expected elevated helper output path argument.");
-            File.WriteAllText(arguments[outputIndex + 1], """
+            var requestPath = FindElevatedRequestPath(root);
+            var requestsJson = File.ReadAllText(requestPath);
+            Assert(requestsJson.Contains(@"""Root"":""D:\\""", StringComparison.Ordinal), $"Expected request file to contain D root: {requestsJson}");
+            Assert(requestsJson.Contains(@"""Root"":""H:\\""", StringComparison.Ordinal), $"Expected request file to contain H root: {requestsJson}");
+
+            File.WriteAllText(OutputPathFromRequestPath(requestPath), """
                 [
                   {"Root":"D:\\","Succeeded":true,"MountPoint":"D:","VolumeStatus":"FullyEncrypted","ProtectionStatus":"On","LockStatus":"Unlocked","EncryptionPercentage":100},
                   {"Root":"H:\\","Succeeded":true,"MountPoint":"H:","VolumeStatus":"FullyDecrypted","ProtectionStatus":"Off","LockStatus":"Unlocked","EncryptionPercentage":0}
@@ -1483,7 +1720,6 @@ static async Task ElevatedBitLockerProviderBatchesMultipleRootsIntoOneAdminLaunc
         Assert(results.Count == 2, $"Expected two drive results, got {results.Count}.");
         Assert(results[@"D:\"].State == DriveSecurityState.Protected, $"Unexpected D state: {results[@"D:\"].State}");
         Assert(results[@"H:\"].State == DriveSecurityState.Unprotected, $"Unexpected H state: {results[@"H:\"].State}");
-        Assert(runner.LastArguments.Contains("-RequestsJson"), "Expected batched requests JSON argument.");
     }
     finally
     {
@@ -1492,6 +1728,127 @@ static async Task ElevatedBitLockerProviderBatchesMultipleRootsIntoOneAdminLaunc
             Directory.Delete(root, recursive: true);
         }
     }
+}
+
+static async Task ElevatedBitLockerHelperScriptEnumeratesWindowsPowerShellJsonRequests()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var scriptPath = Path.Combine(root, "bitlocker-helper.ps1");
+        var requestPath = Path.Combine(root, "bitlocker-helper-requests.json");
+        var outputPath = Path.Combine(root, "bitlocker-helper-output.json");
+
+        File.WriteAllText(scriptPath, BuildElevatedBitLockerHelperScript());
+        File.WriteAllText(requestPath, """[{"Root":"D:\\"},{"Root":"H:\\"}]""");
+
+        var command = string.Join(
+            Environment.NewLine,
+            [
+                "function Get-BitLockerVolume {",
+                "    param([string]$MountPoint)",
+                "    [pscustomobject]@{",
+                "        MountPoint = $MountPoint",
+                "        VolumeStatus = 'FullyEncrypted'",
+                "        ProtectionStatus = if ($MountPoint -eq 'H:') { 'Off' } else { 'On' }",
+                "        LockStatus = 'Unlocked'",
+                "        EncryptionPercentage = if ($MountPoint -eq 'H:') { 0 } else { 100 }",
+                "    }",
+                "}",
+                $"& {PowerShellSingleQuoted(scriptPath)} -RequestsPath {PowerShellSingleQuoted(requestPath)} -OutputPath {PowerShellSingleQuoted(outputPath)}",
+                "exit $LASTEXITCODE"
+            ]);
+
+        var result = await RunWindowsPowerShellAsync(command);
+
+        Assert(result.ExitCode == 0, $"Expected helper script success. stdout: {result.StandardOutput} stderr: {result.StandardError}");
+        Assert(File.Exists(outputPath), "Expected helper script to write output JSON.");
+
+        var output = File.ReadAllText(outputPath);
+        Assert(output.Contains(@"""Root"":""D:\\""", StringComparison.Ordinal), $"Expected scalar D root result: {output}");
+        Assert(output.Contains(@"""Root"":""H:\\""", StringComparison.Ordinal), $"Expected scalar H root result: {output}");
+        Assert(!output.Contains(@"""Root"":[""", StringComparison.Ordinal), $"Expected roots to be written per result, not as an array: {output}");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ElevatedBitLockerHelperScriptWritesOutputForStartupFailures()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var scriptPath = Path.Combine(root, "bitlocker-helper.ps1");
+        var missingRequestPath = Path.Combine(root, "missing-requests.json");
+        var outputPath = Path.Combine(root, "bitlocker-helper-output.json");
+
+        File.WriteAllText(scriptPath, BuildElevatedBitLockerHelperScript());
+
+        var command = string.Join(
+            Environment.NewLine,
+            [
+                $"& {PowerShellSingleQuoted(scriptPath)} -RequestsPath {PowerShellSingleQuoted(missingRequestPath)} -OutputPath {PowerShellSingleQuoted(outputPath)}",
+                "exit $LASTEXITCODE"
+            ]);
+
+        var result = await RunWindowsPowerShellAsync(command);
+
+        Assert(result.ExitCode == 1, $"Expected helper script startup failure. stdout: {result.StandardOutput} stderr: {result.StandardError}");
+        Assert(File.Exists(outputPath), "Expected helper script to write output JSON even when startup fails.");
+
+        var output = File.ReadAllText(outputPath);
+        Assert(output.Contains(@"""Succeeded"":false", StringComparison.Ordinal), $"Expected failed output payload: {output}");
+        Assert(output.Contains("could not start", StringComparison.OrdinalIgnoreCase), $"Expected startup failure reason: {output}");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+static async Task ElevatedBitLockerProviderTimesOutHungAdminHelper()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var runner = new BlockingElevatedProcessRunner();
+    var provider = new ElevatedPowerShellBitLockerStatusProvider(
+        runner,
+        Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N")),
+        TimeSpan.FromMilliseconds(25));
+
+    var item = await provider.CheckAsync(
+        "Source drive",
+        @"D:\repos\personal",
+        @"D:\");
+
+    Assert(item.State == DriveSecurityState.Unknown, $"Expected timeout to report unknown state, got {item.State}.");
+    Assert(item.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase), $"Expected timeout message, got {item.Message}.");
+    Assert(runner.ObservedCancellation, "Expected provider timeout to cancel the elevated process runner.");
 }
 
 static async Task ElevatedBitLockerProviderTreatsCanceledAdminPromptAsPermissionRequired()
@@ -1614,6 +1971,111 @@ static BackupProfile ValidShuttleProfile(Guid profileId, string sourcePath, stri
     };
 }
 
+static string FindElevatedRequestPath(string workingDirectory)
+{
+    return Directory.GetFiles(workingDirectory, "bitlocker-check-*-requests.json").Single();
+}
+
+static string OutputPathFromRequestPath(string requestPath)
+{
+    const string suffix = "-requests.json";
+    Assert(requestPath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase), $"Unexpected elevated request path: {requestPath}");
+    return string.Concat(requestPath.AsSpan(0, requestPath.Length - suffix.Length), ".json");
+}
+
+static string BuildElevatedBitLockerHelperScript()
+{
+    var method = typeof(ElevatedPowerShellBitLockerStatusProvider).GetMethod(
+        "BuildScript",
+        BindingFlags.NonPublic | BindingFlags.Static);
+
+    if (method is null)
+    {
+        throw new InvalidOperationException("Expected elevated BitLocker provider to expose a private helper script builder.");
+    }
+
+    return (string?)method.Invoke(null, null)
+        ?? throw new InvalidOperationException("Elevated BitLocker helper script builder returned no script.");
+}
+
+static string BuildElevatedBitLockerLauncherScript(string scriptPath, string requestsPath, string outputPath)
+{
+    var method = typeof(ElevatedPowerShellBitLockerStatusProvider).GetMethod(
+        "BuildLauncherScript",
+        BindingFlags.NonPublic | BindingFlags.Static);
+
+    if (method is null)
+    {
+        throw new InvalidOperationException("Expected elevated BitLocker provider to expose a private launcher script builder.");
+    }
+
+    return (string?)method.Invoke(null, [scriptPath, requestsPath, outputPath])
+        ?? throw new InvalidOperationException("Elevated BitLocker launcher script builder returned no script.");
+}
+
+static string PowerShellSingleQuoted(string value)
+{
+    return $"'{value.Replace("'", "''")}'";
+}
+
+static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunWScriptAsync(string scriptPath)
+{
+    var startInfo = new ProcessStartInfo("wscript.exe")
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+    };
+
+    startInfo.ArgumentList.Add("//B");
+    startInfo.ArgumentList.Add("//Nologo");
+    startInfo.ArgumentList.Add(scriptPath);
+
+    using var process = Process.Start(startInfo)
+        ?? throw new InvalidOperationException("Failed to start WScript.");
+
+    var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+    var standardErrorTask = process.StandardError.ReadToEndAsync();
+
+    await process.WaitForExitAsync();
+
+    return (
+        process.ExitCode,
+        await standardOutputTask,
+        await standardErrorTask);
+}
+
+static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunWindowsPowerShellAsync(string command)
+{
+    var startInfo = new ProcessStartInfo("powershell.exe")
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+    };
+
+    startInfo.ArgumentList.Add("-NoProfile");
+    startInfo.ArgumentList.Add("-ExecutionPolicy");
+    startInfo.ArgumentList.Add("Bypass");
+    startInfo.ArgumentList.Add("-Command");
+    startInfo.ArgumentList.Add(command);
+
+    using var process = Process.Start(startInfo)
+        ?? throw new InvalidOperationException("Failed to start Windows PowerShell.");
+
+    var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+    var standardErrorTask = process.StandardError.ReadToEndAsync();
+
+    await process.WaitForExitAsync();
+
+    return (
+        process.ExitCode,
+        await standardOutputTask,
+        await standardErrorTask);
+}
+
 static void Assert(bool condition, string message)
 {
     if (!condition)
@@ -1713,5 +2175,28 @@ sealed class FakeElevatedProcessRunner(Func<IReadOnlyList<string>, Task<int>> ru
         LastFileName = fileName;
         LastArguments = arguments.ToList();
         return await run(LastArguments);
+    }
+}
+
+sealed class BlockingElevatedProcessRunner : IElevatedProcessRunner
+{
+    public bool ObservedCancellation { get; private set; }
+
+    public async Task<int> RunAsync(
+        string fileName,
+        IEnumerable<string> arguments,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            ObservedCancellation = true;
+            throw;
+        }
+
+        return 0;
     }
 }

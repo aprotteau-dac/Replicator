@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace Replicator.Core.Execution;
@@ -24,7 +25,33 @@ public sealed class ElevatedProcessRunner : IElevatedProcessRunner
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"Failed to start elevated process: {fileName}");
 
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
+
         return process.ExitCode;
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (Win32Exception)
+        {
+        }
     }
 }

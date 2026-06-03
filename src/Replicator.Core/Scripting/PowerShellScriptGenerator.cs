@@ -1,5 +1,6 @@
 using System.Text;
 using Replicator.Core.Models;
+using Replicator.Core.Scheduling;
 
 namespace Replicator.Core.Scripting;
 
@@ -35,6 +36,7 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
         Directory.CreateDirectory(logsDirectory);
 
         await File.WriteAllTextAsync(script.Path, script.Content, Encoding.UTF8, cancellationToken);
+        await PowerShellScheduledTaskLauncher.WriteAsync(script.Path, cancellationToken);
         return script;
     }
 

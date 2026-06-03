@@ -120,7 +120,7 @@ public sealed class WindowsScheduledTaskService(IProcessRunner processRunner) : 
             "/TN",
             taskName,
             "/TR",
-            $"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{scriptPath}\"",
+            PowerShellScheduledTaskLauncher.BuildTaskRunCommand(scriptPath),
             "/F"
         };
 

@@ -497,28 +497,37 @@ public partial class MainWindow : Window
 
     private void ShowTaskActionCenter(ScheduledTaskInventoryResult? inventory)
     {
-        if (inventory is null || !inventory.Summary.HasIssues)
+        var selectedIssue = GetSelectedProfileIssueItem(inventory);
+        if (inventory is null || selectedIssue is null)
         {
             TaskActionCenterPanel.Visibility = Visibility.Collapsed;
             return;
         }
 
         TaskActionCenterPanel.Visibility = Visibility.Visible;
-        TaskActionCenterTitleTextBlock.Text = "Scheduled task review needed";
-        TaskActionCenterSummaryTextBlock.Text = inventory.Summary.ToDisplayString();
+        TaskActionCenterTitleTextBlock.Text = selectedIssue.CanRepair
+            ? "Selected scheduled task needs repair"
+            : "Selected scheduled task review needed";
+        TaskActionCenterSummaryTextBlock.Text = selectedIssue.Reason;
         ReviewTaskInventoryButton.IsEnabled = !_isBusy && inventory.Items.Count > 0;
-        RepairSelectedInventoryTaskButton.IsEnabled = !_isBusy && GetSelectedProfileRepairItem() is not null;
+        RepairSelectedInventoryTaskButton.IsEnabled = !_isBusy && selectedIssue.CanRepair;
     }
 
     private ScheduledTaskInventoryItem? GetSelectedProfileRepairItem()
     {
+        var issue = GetSelectedProfileIssueItem(_taskInventory);
+        return issue?.CanRepair == true ? issue : null;
+    }
+
+    private ScheduledTaskInventoryItem? GetSelectedProfileIssueItem(ScheduledTaskInventoryResult? inventory)
+    {
         var profile = GetSelectedProfile(showStatus: false);
-        if (profile is null || _taskInventory is null)
+        if (profile is null)
         {
             return null;
         }
 
-        return _taskInventory.Items.FirstOrDefault(item => item.ProfileId == profile.Id && item.CanRepair);
+        return ScheduledTaskInventoryIssueSelector.ForProfile(inventory, profile.Id);
     }
 
     private async Task<TaskOperationResult> InstallOrUpdateTaskForProfileAsync(BackupProfile profile)
@@ -874,7 +883,7 @@ public partial class MainWindow : Window
             profile,
             _elevatedDriveSecurityProvider,
             "Drive security: waiting for administrator approval...",
-            refreshAll: true,
+            refreshSelectedProfile: true,
             cancellationToken);
     }
 
@@ -882,7 +891,7 @@ public partial class MainWindow : Window
         BackupProfile profile,
         IBitLockerStatusProvider provider,
         string checkingMessage,
-        bool refreshAll = false,
+        bool refreshSelectedProfile = false,
         CancellationToken cancellationToken = default)
     {
         var profileId = profile.Id;
@@ -892,9 +901,9 @@ public partial class MainWindow : Window
         try
         {
             var profiles = _profiles.ToList();
-            if (refreshAll)
+            if (refreshSelectedProfile)
             {
-                await _driveSecurityCache.RefreshAsync(profiles, provider, cancellationToken);
+                await _driveSecurityCache.RefreshAsync(profile, provider, cancellationToken);
             }
             else
             {

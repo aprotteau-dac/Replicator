@@ -23,7 +23,7 @@ public static class BitLockerQueryFailureClassifier
                 root,
                 DriveSecurityState.PermissionRequired,
                 DriveSecuritySeverity.Warning,
-                $"Drive security: {label} BitLocker status requires elevated permissions ({root}). Replicator can continue, but encryption state was not confirmed. Use Check All as Admin to confirm.");
+                $"Drive security: {label} BitLocker status requires elevated permissions ({root}). Replicator can continue, but encryption state was not confirmed. Use Check as Admin to confirm.");
         }
 
         return new DriveSecurityItem(
