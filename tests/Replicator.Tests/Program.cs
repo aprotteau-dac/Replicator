@@ -27,6 +27,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("relay command executes when allowed", RelayCommandExecutesWhenAllowed),
     ("async command disables while executing", AsyncCommandDisablesWhileExecuting),
     ("status message ready is success", StatusMessageReadyIsSuccess),
+    ("profile form loads and applies backup profile edits", ProfileFormLoadsAndAppliesBackupProfileEdits),
+    ("profile form rejects invalid start time", ProfileFormRejectsInvalidStartTime),
+    ("profile form rejects invalid interval", ProfileFormRejectsInvalidInterval),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
     ("shuttle source enumeration prunes excluded directories", ShuttleSourceEnumerationPrunesExcludedDirectories),
@@ -133,6 +136,60 @@ static Task StatusMessageReadyIsSuccess()
 {
     Assert(StatusMessage.Ready.Text == "Ready.", $"Unexpected ready text: {StatusMessage.Ready.Text}");
     Assert(StatusMessage.Ready.Kind == StatusKind.Success, $"Unexpected ready kind: {StatusMessage.Ready.Kind}");
+    return Task.CompletedTask;
+}
+
+static Task ProfileFormLoadsAndAppliesBackupProfileEdits()
+{
+    var profile = ValidProfile();
+    var form = new Replicator.Presentation.ViewModels.ProfileFormViewModel();
+
+    form.Load(profile);
+    form.Name = "Daily Scratch";
+    form.SourcePath = @"C:\work\daily";
+    form.DestinationPath = @"D:\backups\daily";
+    form.TimeText = "06:30";
+    form.IntervalText = "15";
+    form.Cadence = ScheduleCadence.Minutes;
+    form.DryRun = false;
+
+    var result = form.TryApply(profile);
+
+    Assert(result.Succeeded, result.Message);
+    Assert(profile.Name == "Daily Scratch", $"Unexpected name: {profile.Name}");
+    Assert(profile.SourcePath == @"C:\work\daily", $"Unexpected source: {profile.SourcePath}");
+    Assert(profile.Target.Path == @"D:\backups\daily", $"Unexpected target: {profile.Target.Path}");
+    Assert(profile.Schedule.TimeOfDay == new TimeOnly(6, 30), $"Unexpected time: {profile.Schedule.TimeOfDay}");
+    Assert(profile.Schedule.IntervalMinutes == 15, $"Unexpected minute interval: {profile.Schedule.IntervalMinutes}");
+    Assert(!profile.DryRun, "Expected dry run to be disabled.");
+    return Task.CompletedTask;
+}
+
+static Task ProfileFormRejectsInvalidStartTime()
+{
+    var profile = ValidProfile();
+    var form = new Replicator.Presentation.ViewModels.ProfileFormViewModel();
+    form.Load(profile);
+    form.TimeText = "25:99";
+
+    var result = form.TryApply(profile);
+
+    Assert(!result.Succeeded, "Expected invalid time to fail.");
+    Assert(result.Message == "Start time must be a valid time.", $"Unexpected message: {result.Message}");
+    return Task.CompletedTask;
+}
+
+static Task ProfileFormRejectsInvalidInterval()
+{
+    var profile = ValidProfile();
+    var form = new Replicator.Presentation.ViewModels.ProfileFormViewModel();
+    form.Load(profile);
+    form.IntervalText = "every hour";
+
+    var result = form.TryApply(profile);
+
+    Assert(!result.Succeeded, "Expected invalid interval to fail.");
+    Assert(result.Message == "Interval must be a number.", $"Unexpected message: {result.Message}");
     return Task.CompletedTask;
 }
 
