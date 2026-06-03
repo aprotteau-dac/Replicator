@@ -2,7 +2,7 @@
 
 Replicator is a Windows backup and shuttle-control app for people who maintain sensitive local workstreams that should not be pushed to cloud sync or ordinary Git remotes.
 
-It is a .NET 8 WPF desktop app that manages local backup profiles, generates auditable PowerShell scripts, installs scheduled tasks, and supports an early external-drive shuttle workflow for moving paired repos/folders between trusted machines.
+It is a .NET 10 WinUI 3 desktop app that manages local backup profiles, generates auditable PowerShell scripts, installs scheduled tasks, and supports an early external-drive shuttle workflow for moving paired repos/folders between trusted machines.
 
 > Status: early prototype. Backup mode is usable for local testing with availability preflight, generated scripts, Task Scheduler integration, and minute/hourly/daily/weekly cadences. Shuttle mode is a first vertical slice with progress, cancellation, and conflict-preserving receive behavior, but still needs review, restore tooling, resumability, and conflict UX.
 
@@ -19,7 +19,7 @@ The app separates several concepts that are often conflated:
 
 ## Current Capabilities
 
-- Windows-only WPF UI with the Replicator Industrial Red brand theme.
+- Windows-only WinUI 3 UI with the Replicator Industrial Red brand theme.
 - Local source-to-local destination backup profiles.
 - Controlled shuttle profiles for external-drive handoff between trusted machines.
 - Generated PowerShell scripts under `%LOCALAPPDATA%\Replicator\scripts`.
@@ -37,7 +37,7 @@ The app separates several concepts that are often conflated:
 ## Requirements
 
 - Windows
-- .NET 8 SDK
+- .NET 10 SDK
 - PowerShell
 - `robocopy` for the current native backup engine
 
@@ -226,7 +226,7 @@ Home/travel machine:
 
 Current shuttle actions are manual. Scheduled `Protect` for shuttle pairs should be implemented as a dedicated shuttle task runner rather than reusing the backup robocopy script, because shuttle protect needs manifests and pending-inbound guards.
 
-Field note: shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the WPF UI thread, report throttled file-count progress, can be canceled from the UI, preserve payload timestamps, prune excluded directories before recursion, and write per-file manifest entries with SHA-256 hashes. First-time staging hashes while copying so new source files are not read twice. Later prepares can reuse unchanged manifest hashes, and dock/receive can classify drifted-timestamp files from the manifest hash without re-reading the shuttle payload file. Current long-smoke timing on a generated 6,500-file tree: first prepare about 8-10s, skipped prepare under 1s, dock analysis about 2s.
+Field note: shuttling about 6,500 files worked, but caused major UI lockup in the first prototype. Shuttle operations now run off the UI thread, report throttled file-count progress, can be canceled from the UI, preserve payload timestamps, prune excluded directories before recursion, and write per-file manifest entries with SHA-256 hashes. First-time staging hashes while copying so new source files are not read twice. Later prepares can reuse unchanged manifest hashes, and dock/receive can classify drifted-timestamp files from the manifest hash without re-reading the shuttle payload file. Current long-smoke timing on a generated 6,500-file tree: first prepare about 8-10s, skipped prepare under 1s, dock analysis about 2s.
 
 ## Known Limitations
 
@@ -262,7 +262,7 @@ Near-term backlog items:
 - **Drive identity over drive letters**: bind profiles to volume identity/label/serial metadata so `E:` becoming `F:` does not break profiles.
 - **Shuttle protect cadence**: add a dedicated scheduled shuttle-protect runner that writes manifests and respects pending inbound state, rather than reusing the backup robocopy runner.
 - **Shuttle as profile capability**: redesign profiles so a profile can run scheduled protect/backup behavior and also expose shuttle actions. The current `Backup` versus `Shuttle` split is a prototype simplification.
-- **Large shuttle performance**: first slices implemented. Shuttle file work now runs off the WPF UI thread with throttled file-count progress, stream hashing, hash-while-copy staging, timestamp-preserving payload copies, manifest file indexes, metadata fast-skip checks, manifest-hash fallback checks, and user-initiated cancellation. Remaining work: resumability and avoiding long operation output in a single text box.
+- **Large shuttle performance**: first slices implemented. Shuttle file work now runs off the UI thread with throttled file-count progress, stream hashing, hash-while-copy staging, timestamp-preserving payload copies, manifest file indexes, metadata fast-skip checks, manifest-hash fallback checks, and user-initiated cancellation. Remaining work: resumability and avoiding long operation output in a single text box.
 - **Job history and audit UI**: replace the results textbox with a tabular jobs view backed by SQLite or another lightweight local database. Every backup/shuttle/restore run should create an auditable job record with stats, logs, artifacts, and drill-down detail.
 - **Path drift compensation**: match shuttle pairs even when the local repo/folder moved or has a different intermediate path, using explicit pair ids, Git history/ref fingerprints, and content similarity.
 - **Git shuttle engine**: support external-drive bare Git remotes for sensitive repos so committed work can move through Git’s conflict model without network remotes.
@@ -270,17 +270,9 @@ Near-term backlog items:
 - **Restore/converge workflows**: keep backup namespaces authoritative and build explicit preview-first restore/converge flows from those backups.
 - **Conflict review UI**: replace the current conflict-preserve behavior with a reviewer surface for incoming, local, and preserved copies.
 
-## WinUI 3 Path
+## WinUI 3 Shell
 
-The current UI is WPF to keep the initial app simple and compatible with the local Windows scripting/task-scheduler workflow.
-
-A future WinUI 3 refactor should:
-
-- Keep backup profiles, script generation, scheduling, shuttle manifests, and log parsing in `Replicator.Core`.
-- Introduce view models that expose commands and observable state without referencing WPF types.
-- Create a new WinUI 3 presentation project that binds to those view models.
-- Replace the WPF theme dictionary with native WinUI 3 resources, AppWindow behavior, InfoBars, ProgressRing/ProgressBar, TeachingTips, and Fluent command surfaces.
-- Retire the WPF project after parity for profile editing, run status, logs, scheduled task management, and shuttle workflows.
+The desktop shell has moved from WPF to WinUI 3. Future UI work should build on `Replicator.Presentation` view models and keep Core behavior out of the WinUI code-behind.
 
 ## License
 

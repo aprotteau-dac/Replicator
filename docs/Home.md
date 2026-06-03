@@ -1,6 +1,6 @@
 # Replicator Docs
 
-Replicator is a Windows backup and shuttle-control app for sensitive local workstreams that should not be pushed to cloud sync or ordinary Git remotes.
+Replicator is a .NET 10 WinUI 3 Windows backup and shuttle-control app for sensitive local workstreams that should not be pushed to cloud sync or ordinary Git remotes.
 
 Use these docs as the project wiki until the GitHub wiki is available.
 
@@ -21,4 +21,4 @@ Use these docs as the project wiki until the GitHub wiki is available.
 
 ## Current Status
 
-Replicator is an early prototype. Backup mode is usable for local testing with availability preflight, minute/hourly/daily/weekly schedules, generated PowerShell scripts, and Task Scheduler integration. Shuttle mode is a first vertical slice for controlled external-drive handoff with progress, cancellation, and conflict-preserving receive behavior. It should still be used carefully until conflict review, drive identity, resumability, and secure-drive enforcement mature.
+Replicator is an early .NET 10 WinUI 3 prototype. Backup mode is usable for local testing with availability preflight, minute/hourly/daily/weekly schedules, generated PowerShell scripts, and Task Scheduler integration. Shuttle mode is a first vertical slice for controlled external-drive handoff with progress, cancellation, and conflict-preserving receive behavior. It should still be used carefully until conflict review, drive identity, resumability, and secure-drive enforcement mature.

@@ -22,6 +22,14 @@ public sealed class ProfileDriveSecurityCache
         await CheckAsync(profiles, provider, overwriteExisting: true, cancellationToken);
     }
 
+    public async Task RefreshAsync(
+        BackupProfile profile,
+        IBitLockerStatusProvider provider,
+        CancellationToken cancellationToken = default)
+    {
+        await CheckAsync([profile], provider, overwriteExisting: true, cancellationToken);
+    }
+
     public ProfileDriveSecurityReport Report(BackupProfile profile)
     {
         var items = ProfileDriveSecurityCandidates
@@ -115,10 +123,22 @@ public sealed class ProfileDriveSecurityCache
             DriveSecurityState.Locked => $"Drive security: {label} is BitLocker locked ({root}).",
             DriveSecurityState.Protected => $"Drive security: {label} is BitLocker protected ({root}).",
             DriveSecurityState.Unprotected => $"Drive security: {label} is not BitLocker protected ({root}).",
-            DriveSecurityState.PermissionRequired => $"Drive security: {label} BitLocker status requires elevated permissions ({root}). Replicator can continue, but encryption state was not confirmed. Use Check All as Admin to confirm.",
+            DriveSecurityState.PermissionRequired => $"Drive security: {label} BitLocker status requires elevated permissions ({root}). Replicator can continue, but encryption state was not confirmed. Use Check as Admin to confirm.",
             DriveSecurityState.Unavailable => $"Drive security: {label} is unavailable ({root}).",
             DriveSecurityState.NotApplicable => $"Drive security: {label} is not a local Windows drive.",
-            _ => $"Drive security: {label} BitLocker status unknown ({root})."
+            _ => UnknownMessageFor(label, root, cachedMessage)
         };
+    }
+
+    private static string UnknownMessageFor(string label, string root, string cachedMessage)
+    {
+        const string reasonSeparator = "). ";
+        var reasonIndex = cachedMessage.IndexOf(reasonSeparator, StringComparison.Ordinal);
+        if (reasonIndex >= 0 && reasonIndex + reasonSeparator.Length < cachedMessage.Length)
+        {
+            return $"Drive security: {label} BitLocker status unknown ({root}). {cachedMessage[(reasonIndex + reasonSeparator.Length)..]}";
+        }
+
+        return $"Drive security: {label} BitLocker status unknown ({root}).";
     }
 }

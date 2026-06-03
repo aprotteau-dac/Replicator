@@ -7,9 +7,13 @@ namespace Replicator.Core.Security;
 
 public sealed class ElevatedPowerShellBitLockerStatusProvider(
     IElevatedProcessRunner processRunner,
-    string? workingDirectory = null) : IBitLockerStatusProvider, IBitLockerBatchStatusProvider
+    string? workingDirectory = null,
+    TimeSpan? processTimeout = null) : IBitLockerStatusProvider, IBitLockerBatchStatusProvider
 {
+    private static readonly TimeSpan DefaultProcessTimeout = TimeSpan.FromMinutes(2);
+
     private readonly string _workingDirectory = workingDirectory ?? Path.Combine(Path.GetTempPath(), "Replicator", "security");
+    private readonly TimeSpan _processTimeout = processTimeout ?? DefaultProcessTimeout;
 
     public async Task<DriveSecurityItem> CheckAsync(
         string label,
@@ -53,30 +57,38 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
 
         Directory.CreateDirectory(_workingDirectory);
         var checkId = Guid.NewGuid().ToString("N");
-        var scriptPath = Path.Combine(_workingDirectory, $"bitlocker-check-{checkId}.ps1");
+        var requestsPath = Path.Combine(_workingDirectory, $"bitlocker-check-{checkId}-requests.json");
         var outputPath = Path.Combine(_workingDirectory, $"bitlocker-check-{checkId}.json");
 
         try
         {
-            await File.WriteAllTextAsync(scriptPath, BuildScript(), Encoding.UTF8, cancellationToken);
+            await File.WriteAllTextAsync(requestsPath, BuildRequestsJson(uniqueCandidates), Encoding.UTF8, cancellationToken);
 
-            var exitCode = await processRunner.RunAsync(
-                "powershell.exe",
-                [
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    scriptPath,
-                    "-RequestsJson",
-                    BuildRequestsJson(uniqueCandidates),
-                    "-OutputPath",
-                    outputPath
-                ],
-                cancellationToken);
+            int exitCode;
+            using (var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                timeoutSource.CancelAfter(_processTimeout);
+                try
+                {
+                    exitCode = await processRunner.RunAsync(
+                        WindowsPowerShellPath(),
+                        [
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-WindowStyle",
+                            "Hidden",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-EncodedCommand",
+                            BuildEncodedCommand(requestsPath, outputPath)
+                        ],
+                        timeoutSource.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutSource.IsCancellationRequested)
+                {
+                    return TimeoutResults(uniqueCandidates);
+                }
+            }
 
             if (!File.Exists(outputPath))
             {
@@ -115,9 +127,22 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
         }
         finally
         {
-            TryDelete(scriptPath);
+            TryDelete(requestsPath);
             TryDelete(outputPath);
         }
+    }
+
+    private IReadOnlyDictionary<string, DriveSecurityItem> TimeoutResults(IReadOnlyList<DriveSecurityCandidate> candidates)
+    {
+        var seconds = Math.Max(1, (int)Math.Ceiling(_processTimeout.TotalSeconds));
+        return candidates.ToDictionary(
+            candidate => candidate.Root,
+            candidate => BitLockerQueryFailureClassifier.ToSecurityItem(
+                candidate.Label,
+                candidate.Path,
+                candidate.Root,
+                $"Elevated BitLocker status check timed out after {seconds} second(s)."),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyDictionary<string, DriveSecurityItem> ParseOutput(
@@ -193,42 +218,76 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
         return """
             param(
                 [Parameter(Mandatory = $true)]
-                [string]$RequestsJson,
+                [string]$RequestsPath,
 
                 [Parameter(Mandatory = $true)]
                 [string]$OutputPath
             )
 
-            $requests = @($RequestsJson | ConvertFrom-Json)
-            $results = foreach ($request in $requests) {
-                try {
-                    $mountPoint = $request.Root.TrimEnd('\', '/')
-                    $volume = Get-BitLockerVolume -MountPoint $mountPoint -ErrorAction Stop
-                    [ordered]@{
-                        Root = $request.Root
-                        Succeeded = $true
-                        MountPoint = $volume.MountPoint
-                        VolumeStatus = $volume.VolumeStatus.ToString()
-                        ProtectionStatus = $volume.ProtectionStatus.ToString()
-                        LockStatus = $volume.LockStatus.ToString()
-                        EncryptionPercentage = $volume.EncryptionPercentage
-                    }
-                }
-                catch {
-                    [ordered]@{
-                        Root = $request.Root
-                        Succeeded = $false
-                        Error = $_.Exception.Message
-                    }
-                }
-            }
+            $ErrorActionPreference = 'Stop'
 
-            $results | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
-            if ($results | Where-Object { -not $_.Succeeded }) {
+            function Write-FailureResult([string]$ErrorMessage) {
+                [ordered]@{
+                    Succeeded = $false
+                    Error = $ErrorMessage
+                } | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
                 exit 1
             }
-            exit 0
+
+            try {
+                $RequestsJson = Get-Content -LiteralPath $RequestsPath -Raw -ErrorAction Stop
+                $requests = @($RequestsJson | ConvertFrom-Json -ErrorAction Stop | ForEach-Object { $_ })
+                if ($requests.Count -eq 0) {
+                    throw 'Elevated BitLocker status check could not start because no drive requests were supplied.'
+                }
+
+                $results = foreach ($request in $requests) {
+                    try {
+                        $mountPoint = $request.Root.TrimEnd('\', '/')
+                        $volume = Get-BitLockerVolume -MountPoint $mountPoint -ErrorAction Stop
+                        [ordered]@{
+                            Root = $request.Root
+                            Succeeded = $true
+                            MountPoint = $volume.MountPoint
+                            VolumeStatus = $volume.VolumeStatus.ToString()
+                            ProtectionStatus = $volume.ProtectionStatus.ToString()
+                            LockStatus = $volume.LockStatus.ToString()
+                            EncryptionPercentage = $volume.EncryptionPercentage
+                        }
+                    }
+                    catch {
+                        [ordered]@{
+                            Root = $request.Root
+                            Succeeded = $false
+                            Error = $_.Exception.Message
+                        }
+                    }
+                }
+
+                $results | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+                if ($results | Where-Object { -not $_.Succeeded }) {
+                    exit 1
+                }
+                exit 0
+            }
+            catch {
+                Write-FailureResult "Elevated BitLocker status check could not start. $($_.Exception.Message)"
+            }
             """;
+    }
+
+    private static string BuildEncodedCommand(string requestsPath, string outputPath)
+    {
+        var command = string.Join(
+            Environment.NewLine,
+            [
+                "$helper = @'",
+                BuildScript(),
+                "'@",
+                $"& ([scriptblock]::Create($helper)) -RequestsPath {PowerShellSingleQuoted(requestsPath)} -OutputPath {PowerShellSingleQuoted(outputPath)}",
+                "exit $LASTEXITCODE"
+            ]);
+        return Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
     }
 
     private static string BuildRequestsJson(IEnumerable<DriveSecurityCandidate> candidates)
@@ -239,6 +298,19 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
         });
 
         return JsonSerializer.Serialize(requests);
+    }
+
+    private static string PowerShellSingleQuoted(string value)
+    {
+        return $"'{value.Replace("'", "''")}'";
+    }
+
+    private static string WindowsPowerShellPath()
+    {
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return string.IsNullOrWhiteSpace(windowsDirectory)
+            ? "powershell.exe"
+            : Path.Combine(windowsDirectory, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     }
 
     private static bool ReadBool(JsonElement element, string propertyName)

@@ -1,45 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  Replicator · Logo.xaml
-  The Interlock mark as a reusable WPF DrawingImage. Use:
-    <Image Source="{StaticResource Logo.Mark}" Width="64" Height="64"/>
--->
 <ResourceDictionary
-  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-
-  <DrawingImage x:Key="Logo.Mark">
-    <DrawingImage.Drawing>
-      <DrawingGroup>
-        <DrawingGroup.ClipGeometry>
-          <RectangleGeometry Rect="0,0,64,64"/>
-        </DrawingGroup.ClipGeometry>
-
-        <GeometryDrawing>
-          <GeometryDrawing.Pen>
-            <Pen Brush="{DynamicResource Brush.Ink.Bone}" Thickness="2.5" LineJoin="Miter"/>
-          </GeometryDrawing.Pen>
-          <GeometryDrawing.Geometry>
-            <PathGeometry Figures="M8,8 H40 V20 H20 V40 H8 Z"/>
-          </GeometryDrawing.Geometry>
-        </GeometryDrawing>
-
-        <GeometryDrawing>
-          <GeometryDrawing.Pen>
-            <Pen Brush="{DynamicResource Brush.Ink.Bone}" Thickness="2.5" LineJoin="Miter"/>
-          </GeometryDrawing.Pen>
-          <GeometryDrawing.Geometry>
-            <PathGeometry Figures="M56,56 H24 V44 H44 V24 H56 Z"/>
-          </GeometryDrawing.Geometry>
-        </GeometryDrawing>
-
-        <GeometryDrawing Brush="{DynamicResource Brush.Red.Primary}">
-          <GeometryDrawing.Geometry>
-            <RectangleGeometry Rect="22,22,20,20"/>
-          </GeometryDrawing.Geometry>
-        </GeometryDrawing>
-      </DrawingGroup>
-    </DrawingImage.Drawing>
-  </DrawingImage>
-
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <PathIconSource x:Key="Logo.Mark"
+                    Foreground="{StaticResource AccentBrush}"
+                    Data="M4,4 H28 V12 H12 V28 H4 Z M44,44 H20 V36 H36 V20 H44 Z M18,18 H30 V30 H18 Z" />
 </ResourceDictionary>

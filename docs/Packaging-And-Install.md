@@ -30,6 +30,8 @@ Create a self-contained Windows x64 package:
 .\tools\publish-release.ps1 -Version 0.1.0
 ```
 
+The WinUI 3 app is published as an unpackaged, self-contained Windows App SDK app. The package remains folder-based and installs per-user.
+
 The script writes:
 
 ```text

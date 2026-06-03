@@ -14,7 +14,7 @@ Expected result:
 
 ```text
 Build succeeded.
-43 test(s) passed.
+91 test(s) passed.
 Replicator smoke gates passed.
 ```
 
@@ -44,8 +44,16 @@ This gate covers:
 - BitLocker parser classification
 - BitLocker permission-required classification and provider mapping
 - drive-security cache behavior across profile roots
-- elevated BitLocker batch verification behavior
-- profile drive-security summary behavior
+
+## Manual WinUI Shell Checks
+
+1. Launch the WinUI 3 shell from `dotnet run`.
+2. Confirm profile list, profile form, status bar, and output area render.
+3. Use Browse for source and destination and cancel once.
+4. Open Review Tasks when no tasks exist or when existing Replicator tasks are present.
+5. Run Preview Dry Run for a dry-run profile.
+6. Run Check as Admin when BitLocker status requires elevated verification.
+7. Confirm the profile drive-security summary returns to a non-elevated ready state.
 
 Optional long shuttle smoke:
 

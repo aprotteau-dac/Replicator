@@ -5,7 +5,7 @@ using Replicator.Core.Models;
 
 namespace Replicator.Core.Shuttle;
 
-public sealed class ShuttleService(MachineIdentity machineIdentity)
+public sealed class ShuttleService(MachineIdentity machineIdentity) : IShuttleService
 {
     private static readonly TimeSpan MetadataTimestampTolerance = TimeSpan.FromSeconds(2);
     private static readonly ShuttleSourceFileEnumerator SourceFileEnumerator = new();
