@@ -30,6 +30,11 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("profile form loads and applies backup profile edits", ProfileFormLoadsAndAppliesBackupProfileEdits),
     ("profile form rejects invalid start time", ProfileFormRejectsInvalidStartTime),
     ("profile form rejects invalid interval", ProfileFormRejectsInvalidInterval),
+    ("action surface hides scheduled task commands for manual backup profiles", ActionSurfaceHidesScheduledTaskCommandsForManualBackupProfiles),
+    ("action surface exposes scheduled task commands for ready daily backup profiles", ActionSurfaceExposesScheduledTaskCommandsForReadyDailyBackupProfiles),
+    ("action surface exposes shuttle commands and hides backup run commands", ActionSurfaceExposesShuttleCommandsAndHidesBackupRunCommands),
+    ("action surface disables profile mutation while busy", ActionSurfaceDisablesProfileMutationWhileBusy),
+    ("task inventory distinguishes action center from review visibility", TaskInventoryDistinguishesActionCenterFromReviewVisibility),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
     ("shuttle source enumeration prunes excluded directories", ShuttleSourceEnumerationPrunesExcludedDirectories),
@@ -190,6 +195,126 @@ static Task ProfileFormRejectsInvalidInterval()
 
     Assert(!result.Succeeded, "Expected invalid interval to fail.");
     Assert(result.Message == "Interval must be a number.", $"Unexpected message: {result.Message}");
+    return Task.CompletedTask;
+}
+
+static Task ActionSurfaceHidesScheduledTaskCommandsForManualBackupProfiles()
+{
+    var profile = ValidProfile();
+    profile.Schedule.Cadence = ScheduleCadence.Manual;
+
+    var state = Replicator.Presentation.ViewModels.ActionSurfaceState.From(
+        profile,
+        snapshot: null,
+        isBusy: false,
+        hasCancelableOperation: false,
+        driveSecurityRequiresElevation: false);
+
+    Assert(state.ShowRunNow, "Manual backup profiles should still allow Run Now.");
+    Assert(!state.ShowInstallTask, "Manual backup profiles should not show Install Task.");
+    Assert(!state.ShowRefreshStatus, "Manual backup profiles should not show Refresh Status.");
+    Assert(state.TaskSummaryText.Contains("manual schedule", StringComparison.OrdinalIgnoreCase), $"Unexpected summary: {state.TaskSummaryText}");
+    return Task.CompletedTask;
+}
+
+static Task ActionSurfaceExposesScheduledTaskCommandsForReadyDailyBackupProfiles()
+{
+    var profile = ValidProfile();
+    profile.Schedule.Cadence = ScheduleCadence.Daily;
+    var snapshot = new ScheduledTaskSnapshot(
+        ScheduledTaskName.ForProfile(profile),
+        ScheduledTaskState.Ready,
+        "6/3/2026 6:00:00 PM",
+        "6/2/2026 6:00:00 PM",
+        0,
+        "");
+
+    var state = Replicator.Presentation.ViewModels.ActionSurfaceState.From(
+        profile,
+        snapshot,
+        isBusy: false,
+        hasCancelableOperation: false,
+        driveSecurityRequiresElevation: false);
+
+    Assert(state.ShowInstallTask, "Daily backup profile should show update/install task command.");
+    Assert(state.InstallTaskLabel == "Update Task", $"Unexpected install label: {state.InstallTaskLabel}");
+    Assert(state.ShowStartScheduledTask, "Ready scheduled task should be startable.");
+    Assert(state.ShowDisableTask, "Ready scheduled task should be disableable.");
+    Assert(state.ShowRefreshStatus, "Scheduled profile should expose refresh status.");
+    return Task.CompletedTask;
+}
+
+static Task ActionSurfaceExposesShuttleCommandsAndHidesBackupRunCommands()
+{
+    var profile = ValidProfile();
+    profile.Mode = ProfileMode.Shuttle;
+
+    var state = Replicator.Presentation.ViewModels.ActionSurfaceState.From(
+        profile,
+        snapshot: null,
+        isBusy: false,
+        hasCancelableOperation: false,
+        driveSecurityRequiresElevation: false);
+
+    Assert(!state.ShowRunNow, "Shuttle profiles should hide Run Now.");
+    Assert(!state.ShowGenerateScript, "Shuttle profiles should hide Generate Script.");
+    Assert(state.ShowPrepareShuttle, "Shuttle profiles should expose Prepare Shuttle.");
+    Assert(state.ShowDepartShuttle, "Shuttle profiles should expose Depart.");
+    Assert(state.ShowDockShuttle, "Shuttle profiles should expose Dock Shuttle.");
+    Assert(state.ShowReceiveShuttle, "Shuttle profiles should expose Receive Changes.");
+    return Task.CompletedTask;
+}
+
+static Task ActionSurfaceDisablesProfileMutationWhileBusy()
+{
+    var profile = ValidProfile();
+
+    var state = Replicator.Presentation.ViewModels.ActionSurfaceState.From(
+        profile,
+        snapshot: null,
+        isBusy: true,
+        hasCancelableOperation: true,
+        driveSecurityRequiresElevation: true);
+
+    Assert(!state.CanMutateProfile, "Busy state should disable profile mutation.");
+    Assert(state.ShowCancelOperation, "Cancelable busy operation should show Cancel.");
+    Assert(state.CanCancelOperation, "Cancelable busy operation should enable Cancel.");
+    Assert(state.ShowElevatedDriveSecurity, "Drive security elevation prompt should remain visible while required.");
+    return Task.CompletedTask;
+}
+
+static Task TaskInventoryDistinguishesActionCenterFromReviewVisibility()
+{
+    var profile = ValidProfile();
+    var item = new ScheduledTaskInventoryItem(
+        ScheduledTaskName.ForProfile(profile),
+        profile.Id,
+        profile.Name,
+        ScheduledTaskInventoryState.NeedsRepair,
+        ScheduledTaskState.Ready,
+        "6/3/2026 6:00:00 PM",
+        "6/2/2026 6:00:00 PM",
+        0,
+        "powershell.exe",
+        @"C:\Replicator\profile.ps1",
+        true,
+        ["Visible PowerShell action"],
+        "Visible PowerShell action",
+        "");
+    var inventory = new ScheduledTaskInventoryResult(
+        [item],
+        new ScheduledTaskInventorySummary(Total: 1, Ready: 0, NeedsRepair: 1, Orphaned: 0, Running: 0, Unknown: 0),
+        "");
+    var viewModel = new Replicator.Presentation.ViewModels.TaskInventoryViewModel();
+
+    viewModel.Apply(inventory, selectedIssue: item);
+
+    Assert(viewModel.IsActionCenterVisible, "Selected repair issue should show the Action Center.");
+    Assert(!viewModel.IsReviewOpen, "Applying inventory should not automatically open the review surface.");
+
+    viewModel.OpenReview();
+
+    Assert(viewModel.IsReviewOpen, "Review surface should open when inventory rows exist.");
     return Task.CompletedTask;
 }
 
