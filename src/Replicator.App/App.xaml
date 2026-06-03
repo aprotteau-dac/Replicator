@@ -1,13 +1,13 @@
-﻿<Application x:Class="Replicator.App.App"
-             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml">
+<Application
+    x:Class="Replicator.App.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Replicator.App">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
                 <ResourceDictionary Source="Themes/Brand/Theme.xaml" />
-                <ResourceDictionary Source="Themes/Brand/Compatibility.xaml" />
-                <ResourceDictionary Source="Themes/Brand/AppControls.xaml" />
                 <ResourceDictionary Source="Themes/Brand/Icons.xaml" />
                 <ResourceDictionary Source="Themes/Brand/Logo.xaml" />
             </ResourceDictionary.MergedDictionaries>

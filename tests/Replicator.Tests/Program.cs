@@ -2227,13 +2227,12 @@ static Task MainWindowStatusTextIsLayoutBounded()
     XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
 
-    var statusTextBlock = document
-        .Descendants(presentation + "TextBlock")
-        .Single(element => (string?)element.Attribute(xaml + "Name") == "StatusTextBlock");
+    var statusInfoBar = document
+        .Descendants(presentation + "InfoBar")
+        .Single(element => ((string?)element.Attribute("Title"))?.Contains("Status.Text", StringComparison.Ordinal) == true);
 
-    Assert(statusTextBlock.Attribute("MaxWidth") is not null, "Status text must have MaxWidth so long errors cannot consume the header grid.");
-    Assert((string?)statusTextBlock.Attribute("TextTrimming") == "CharacterEllipsis", "Status text must trim long messages.");
-    Assert((string?)statusTextBlock.Attribute("TextWrapping") == "NoWrap", "Status text must not grow the header vertically.");
+    Assert(statusInfoBar.Attribute("MaxWidth") is not null, "Status InfoBar must have MaxWidth so long errors cannot consume the header grid.");
+    Assert((string?)statusInfoBar.Attribute("IsClosable") == "False", "Status InfoBar must remain a stable status surface.");
     return Task.CompletedTask;
 }
 

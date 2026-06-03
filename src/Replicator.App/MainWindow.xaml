@@ -1,14 +1,16 @@
-<Window x:Class="Replicator.App.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Replicator"
-        Height="760"
-        Width="1180"
-        MinHeight="680"
-        MinWidth="980"
-        Loaded="Window_Loaded"
-        Background="{StaticResource AppBackgroundBrush}">
-    <Grid Margin="16">
+<Window
+    x:Class="Replicator.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:Replicator.App.Converters"
+    Title="Replicator">
+    <Grid x:Name="RootGrid"
+          Background="{StaticResource AppBackgroundBrush}"
+          Margin="16">
+        <Grid.Resources>
+            <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        </Grid.Resources>
+
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="300" />
             <ColumnDefinition Width="16" />
@@ -16,30 +18,49 @@
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0"
-                Style="{StaticResource PanelBorderStyle}"
+                Background="{StaticResource PanelBackgroundBrush}"
+                BorderBrush="{StaticResource BorderSubtleBrush}"
+                BorderThickness="1"
+                CornerRadius="6"
                 Padding="12">
-            <DockPanel LastChildFill="True">
-                <StackPanel DockPanel.Dock="Top">
-                    <TextBlock Text="Profiles"
-                               FontSize="20"
-                               FontWeight="SemiBold"
-                               Margin="0,0,0,10" />
-                    <Button x:Name="NewProfileButton"
-                            Content="New Profile"
-                            Click="NewProfile_Click" />
-                    <Button x:Name="DeleteProfileButton"
-                            Content="Delete Profile"
-                            Click="DeleteProfile_Click" />
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Text="Profiles"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource TextPrimaryBrush}" />
+
+                <StackPanel Grid.Row="1"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                    <Button Content="New Profile"
+                            Command="{Binding NewProfileCommand}" />
+                    <Button Content="Delete"
+                            Command="{Binding DeleteProfileCommand}"
+                            Visibility="{Binding ActionSurface.ShowDeleteProfile, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </StackPanel>
 
-                <ListBox x:Name="ProfilesList"
-                         DisplayMemberPath="Name"
-                         SelectionChanged="ProfilesList_SelectionChanged"
-                         Margin="0,8,0,0" />
-            </DockPanel>
+                <ListView x:Name="ProfilesList"
+                          Grid.Row="2"
+                          ItemsSource="{Binding Profiles}"
+                          SelectedItem="{Binding SelectedProfile, Mode=TwoWay}">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Name}"
+                                       Foreground="{StaticResource TextPrimaryBrush}" />
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
         </Border>
 
-        <Grid Grid.Column="2">
+        <Grid Grid.Column="2"
+              RowSpacing="12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -48,281 +69,210 @@
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
-                    Style="{StaticResource PanelBorderStyle}"
-                    Padding="14"
-                    Margin="0,0,0,12">
-                <Grid>
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource BorderSubtleBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="14">
+                <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <Image Source="{StaticResource Logo.Mark}"
-                                   Width="30"
-                                   Height="30"
-                                   Margin="0,0,12,0"
-                                   VerticalAlignment="Center" />
-                            <TextBlock x:Name="HeaderTextBlock"
-                                       Text="Replicator"
+                    <StackPanel Spacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <IconSourceElement IconSource="{StaticResource Logo.Mark}"
+                                               Width="28"
+                                               Height="28" />
+                            <TextBlock Text="{Binding HeaderText}"
                                        FontSize="24"
                                        FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
+                                       Foreground="{StaticResource TextPrimaryBrush}" />
                         </StackPanel>
-                        <TextBlock x:Name="TaskSummaryTextBlock"
-                                   Text="No profile selected."
-                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                   Margin="0,4,0,0" />
-                        <Grid Margin="0,4,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="18" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Image Source="{StaticResource Icon.Drive}"
-                                   Width="14"
-                                   Height="14"
-                                   VerticalAlignment="Top"
-                                   Margin="0,1,0,0" />
-                            <TextBlock x:Name="AvailabilityTextBlock"
-                                       Grid.Column="1"
-                                       Text="Availability not checked."
+                        <TextBlock Text="{Binding ActionSurface.TaskSummaryText}"
+                                   Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Text="{Binding AvailabilityText}"
+                                   Foreground="{StaticResource TextMutedBrush}" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="{Binding DriveSecurityText}"
                                        Foreground="{StaticResource TextMutedBrush}" />
-                        </Grid>
-                        <Grid Margin="0,4,0,0">
+                            <Button Content="Check as Admin"
+                                    Command="{Binding CheckDriveSecurityAsAdminCommand}"
+                                    Visibility="{Binding ActionSurface.ShowElevatedDriveSecurity, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        </StackPanel>
+                        <ProgressBar IsIndeterminate="True"
+                                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}" />
+                    </StackPanel>
+
+                    <InfoBar Grid.Column="1"
+                             IsOpen="True"
+                             IsClosable="False"
+                             Title="{Binding Status.Text}"
+                             MaxWidth="360" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource BorderSubtleBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="12"
+                    Visibility="{Binding TaskInventory.IsActionCenterVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Scheduled task review needed"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource WarningBrush}" />
+                        <TextBlock Text="{Binding TaskInventory.Summary}"
+                                   Foreground="{StaticResource TextSecondaryBrush}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                Spacing="8">
+                        <Button Content="Review Tasks"
+                                Command="{Binding ReviewTaskInventoryCommand}" />
+                        <Button Content="Repair Task"
+                                Command="{Binding RepairSelectedInventoryTaskCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="2">
+                <Grid RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Border Background="{StaticResource PanelBackgroundBrush}"
+                            BorderBrush="{StaticResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="14">
+                        <Grid ColumnSpacing="10" RowSpacing="8">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="150" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Image Source="{StaticResource Icon.Locked}"
-                                   Width="14"
-                                   Height="14"
-                                   VerticalAlignment="Top"
-                                   Margin="0,1,0,0" />
-                            <TextBlock x:Name="DriveSecurityTextBlock"
-                                       Grid.Column="1"
-                                       Text="Drive security not checked."
-                                       Foreground="{StaticResource TextMutedBrush}" />
-                            <Button x:Name="ElevatedDriveSecurityButton"
-                                    Grid.Column="2"
-                                    Content="Check as Admin"
-                                    Click="CheckDriveSecurityAsAdmin_Click"
-                                    Margin="12,0,0,0"
-                                    Padding="10,4"
-                                    Visibility="Collapsed" />
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Text="Name" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <TextBox x:Name="NameTextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Form.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Grid.Row="1" Text="Source" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <TextBox x:Name="SourcePathTextBox" Grid.Row="1" Grid.Column="1" Text="{Binding Form.SourcePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <Button Grid.Row="1" Grid.Column="2" Content="Browse" Command="{Binding BrowseSourceCommand}" />
+
+                            <TextBlock Grid.Row="2" Text="{Binding Form.DestinationLabel}" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <TextBox x:Name="DestinationPathTextBox" Grid.Row="2" Grid.Column="1" Text="{Binding Form.DestinationPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <Button Grid.Row="2" Grid.Column="2" Content="Browse" Command="{Binding BrowseDestinationCommand}" />
+
+                            <TextBlock Grid.Row="3" Text="Profile mode" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <ComboBox x:Name="ModeComboBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" SelectedItem="{Binding Form.Mode, Mode=TwoWay}" />
+
+                            <TextBlock Grid.Row="4" Text="Cadence" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <ComboBox x:Name="CadenceComboBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" SelectedItem="{Binding Form.Cadence, Mode=TwoWay}" />
+
+                            <TextBlock Grid.Row="5" Text="Start time" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <TextBox x:Name="TimeTextBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Form.TimeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Grid.Row="6" Text="Weekly day" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <ComboBox x:Name="DayOfWeekComboBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" SelectedItem="{Binding Form.DayOfWeek, Mode=TwoWay}" />
+
+                            <TextBlock Grid.Row="7" Text="{Binding Form.IntervalLabel}" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <TextBox x:Name="IntervalTextBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Form.IntervalText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18">
+                                <CheckBox Content="Schedule enabled" IsChecked="{Binding Form.ScheduleEnabled, Mode=TwoWay}" />
+                                <CheckBox Content="Dry run" IsChecked="{Binding Form.DryRun, Mode=TwoWay}" />
+                                <CheckBox Content="Mirror deletes" IsChecked="{Binding Form.MirrorDeletes, Mode=TwoWay}" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="9" Text="Excludes" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Top" />
+                            <TextBox Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" MinHeight="96" AcceptsReturn="True" TextWrapping="NoWrap" Text="{Binding Form.ExcludePatternsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
-                        <ProgressBar x:Name="ActivityProgressBar"
-                                     Height="6"
-                                     Width="420"
-                                     HorizontalAlignment="Left"
-                                     Margin="0,10,0,0"
-                                     Visibility="Collapsed"
-                                     IsIndeterminate="True" />
-                    </StackPanel>
+                    </Border>
 
-                    <TextBlock x:Name="StatusTextBlock"
-                               Grid.Column="1"
-                               Foreground="{StaticResource StatusSuccessBrush}"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               HorizontalAlignment="Right"
-                               MaxWidth="360"
-                               TextAlignment="Right"
-                               TextWrapping="NoWrap"
-                               TextTrimming="CharacterEllipsis"
-                               ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+                    <Border Grid.Row="1"
+                            Background="{StaticResource PanelBackgroundBrush}"
+                            BorderBrush="{StaticResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12"
+                            Visibility="{Binding TaskInventory.IsReviewOpen, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <ListView ItemsSource="{Binding TaskInventory.Items}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="160" />
+                                            <ColumnDefinition Width="220" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="70" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding InventoryState}" />
+                                        <TextBlock Grid.Column="1" Text="{Binding ProfileName}" />
+                                        <TextBlock Grid.Column="2" Text="{Binding TaskName}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="3" Text="{Binding Reason}" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Column="4" Text="{Binding LastRunTime}" />
+                                        <TextBlock Grid.Column="5" Text="{Binding LastResult}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Border>
                 </Grid>
-            </Border>
-
-            <Border x:Name="TaskActionCenterPanel"
-                    Grid.Row="1"
-                    Style="{StaticResource PanelBorderStyle}"
-                    Padding="12"
-                    Margin="0,0,0,12"
-                    Visibility="Collapsed">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <StackPanel>
-                        <TextBlock x:Name="TaskActionCenterTitleTextBlock"
-                                   Text="Scheduled task review needed"
-                                   FontSize="15"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource WarningBrush}" />
-                        <TextBlock x:Name="TaskActionCenterSummaryTextBlock"
-                                   Margin="0,3,0,0"
-                                   Foreground="{StaticResource TextSecondaryBrush}" />
-                    </StackPanel>
-
-                    <WrapPanel Grid.Column="1"
-                               VerticalAlignment="Center"
-                               Margin="16,0,0,0">
-                        <Button x:Name="ReviewTaskInventoryButton"
-                                Content="Review Tasks"
-                                Click="ReviewTaskInventory_Click" />
-                        <Button x:Name="RepairSelectedInventoryTaskButton"
-                                Content="Repair Task"
-                                Click="RepairSelectedInventoryTask_Click" />
-                    </WrapPanel>
-                </Grid>
-            </Border>
-
-            <ScrollViewer Grid.Row="2"
-                          VerticalScrollBarVisibility="Auto">
-                <Border Style="{StaticResource PanelBorderStyle}"
-                        Padding="14">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="145" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <Label Grid.Row="0" Grid.Column="0" Content="Name" />
-                        <TextBox x:Name="NameTextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" />
-
-                        <Label Grid.Row="1" Grid.Column="0">
-                            <StackPanel Orientation="Horizontal">
-                                <Image Source="{StaticResource Icon.Source}"
-                                       Width="14"
-                                       Height="14"
-                                       Margin="0,0,7,0"
-                                       VerticalAlignment="Center" />
-                                <TextBlock Text="Source"
-                                           Foreground="{StaticResource TextSecondaryBrush}"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Label>
-                        <TextBox x:Name="SourcePathTextBox" Grid.Row="1" Grid.Column="1" Margin="0,6,8,0" />
-                        <Button Grid.Row="1" Grid.Column="2" Content="Browse" Click="BrowseSource_Click" Margin="0,6,0,0" />
-
-                        <Label x:Name="DestinationLabel" Grid.Row="2" Grid.Column="0">
-                            <StackPanel Orientation="Horizontal">
-                                <Image x:Name="DestinationLabelIcon"
-                                       Source="{StaticResource Icon.Destination}"
-                                       Width="14"
-                                       Height="14"
-                                       Margin="0,0,7,0"
-                                       VerticalAlignment="Center" />
-                                <TextBlock x:Name="DestinationLabelTextBlock"
-                                           Text="Destination"
-                                           Foreground="{StaticResource TextSecondaryBrush}"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Label>
-                        <TextBox x:Name="DestinationPathTextBox" Grid.Row="2" Grid.Column="1" Margin="0,6,8,0" />
-                        <Button Grid.Row="2" Grid.Column="2" Content="Browse" Click="BrowseDestination_Click" Margin="0,6,0,0" />
-
-                        <Label Grid.Row="3" Grid.Column="0" Content="Profile mode" />
-                        <ComboBox x:Name="ModeComboBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" SelectionChanged="ModeComboBox_SelectionChanged" />
-
-                        <Label Grid.Row="4" Grid.Column="0" Content="Cadence" />
-                        <ComboBox x:Name="CadenceComboBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" SelectionChanged="CadenceComboBox_SelectionChanged" />
-
-                        <Label Grid.Row="5" Grid.Column="0" Content="Start time" />
-                        <TextBox x:Name="TimeTextBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" />
-
-                        <Label Grid.Row="6" Grid.Column="0" Content="Weekly day" />
-                        <ComboBox x:Name="DayOfWeekComboBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" />
-
-                        <Label x:Name="IntervalLabel" Grid.Row="7" Grid.Column="0" Content="Hourly interval" />
-                        <TextBox x:Name="IntervalHoursTextBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" />
-
-                        <Label Grid.Row="8" Grid.Column="0" Content="Options" />
-                        <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
-                            <CheckBox x:Name="ScheduleEnabledCheckBox" Content="Schedule enabled" Margin="0,0,18,0" VerticalAlignment="Center" />
-                            <CheckBox x:Name="DryRunCheckBox" Content="Dry run" Margin="0,0,18,0" VerticalAlignment="Center" />
-                            <CheckBox x:Name="MirrorDeletesCheckBox" Content="Mirror deletes" VerticalAlignment="Center" />
-                        </StackPanel>
-
-                        <Label Grid.Row="9" Grid.Column="0" Content="Excludes" VerticalAlignment="Top" />
-                        <TextBox x:Name="ExcludePatternsTextBox"
-                                 Grid.Row="9"
-                                 Grid.Column="1"
-                                 Grid.ColumnSpan="2"
-                                 Margin="0,8,0,0"
-                                 MinHeight="96"
-                                 AcceptsReturn="True"
-                                 VerticalScrollBarVisibility="Auto"
-                                 TextWrapping="NoWrap" />
-
-                        <Label Grid.Row="10" Grid.Column="0" Content="Task name" />
-                        <TextBlock x:Name="TaskNameTextBlock" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
-
-                        <Label Grid.Row="11" Grid.Column="0" Content="Next run" />
-                        <TextBlock x:Name="NextRunTextBlock" Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
-
-                        <Label Grid.Row="12" Grid.Column="0" Content="Last run" />
-                        <TextBlock x:Name="LastRunTextBlock" Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
-
-                        <Label Grid.Row="13" Grid.Column="0" Content="Latest log" />
-                        <TextBlock x:Name="LatestLogTextBlock" Grid.Row="13" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
-
-                        <Label Grid.Row="14" Grid.Column="0" Content="Run summary" />
-                        <TextBlock x:Name="RunSummaryTextBlock" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Foreground="{StaticResource TextPrimaryBrush}" />
-                    </Grid>
-                </Border>
             </ScrollViewer>
 
             <Border Grid.Row="3"
-                    Style="{StaticResource PanelBorderStyle}"
-                    Padding="14"
-                    Margin="0,12,0,0">
-                <Grid>
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource BorderSubtleBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="14">
+                <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="120" />
                     </Grid.RowDefinitions>
-
-                    <WrapPanel Grid.Row="0">
-                        <Button x:Name="SaveProfileButton" Content="Save Profile" Click="SaveProfile_Click" />
-                        <Button x:Name="GenerateScriptButton" Content="Generate Script" Click="GenerateScript_Click" />
-                        <Button x:Name="InstallTaskButton" Content="Install Task" Click="InstallTask_Click" />
-                        <Button x:Name="RunNowButton" Content="Run Now" Click="RunNow_Click" />
-                        <Button x:Name="StartScheduledTaskButton" Content="Start Scheduled Task" Click="RunTask_Click" />
-                        <Button x:Name="PreviewDryRunButton" Content="Preview Dry Run" Click="RunScriptDry_Click" />
-                        <Button x:Name="EnableTaskButton" Content="Enable Task" Click="EnableTask_Click" />
-                        <Button x:Name="DisableTaskButton" Content="Disable Task" Click="DisableTask_Click" />
-                        <Button x:Name="RemoveTaskButton" Content="Remove Task" Click="RemoveTask_Click" />
-                        <Button x:Name="RefreshStatusButton" Content="Refresh Status" Click="RefreshStatus_Click" />
-                        <Button x:Name="CancelOperationButton" Content="Cancel" Click="CancelOperation_Click" Visibility="Collapsed" />
-                        <Button x:Name="PrepareShuttleButton" Content="Prepare Shuttle" Click="PrepareShuttle_Click" />
-                        <Button x:Name="DepartShuttleButton" Content="Depart" Click="DepartShuttle_Click" />
-                        <Button x:Name="DockShuttleButton" Content="Dock Shuttle" Click="DockShuttle_Click" />
-                        <Button x:Name="ReceiveShuttleButton" Content="Receive Changes" Click="ReceiveShuttle_Click" />
-                    </WrapPanel>
-
-                    <TextBox x:Name="OutputTextBox"
-                             Grid.Row="1"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             FontFamily="Consolas"
-                             FontSize="12"
-                             Margin="0,8,0,0" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Save Profile" Command="{Binding SaveProfileCommand}" Visibility="{Binding ActionSurface.ShowSaveProfile, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Generate Script" Command="{Binding GenerateScriptCommand}" Visibility="{Binding ActionSurface.ShowGenerateScript, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="{Binding ActionSurface.InstallTaskLabel}" Command="{Binding InstallTaskCommand}" Visibility="{Binding ActionSurface.ShowInstallTask, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Run Now" Command="{Binding RunNowCommand}" Visibility="{Binding ActionSurface.ShowRunNow, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Start Scheduled Task" Command="{Binding StartScheduledTaskCommand}" Visibility="{Binding ActionSurface.ShowStartScheduledTask, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Preview Dry Run" Command="{Binding PreviewDryRunCommand}" Visibility="{Binding ActionSurface.ShowPreviewDryRun, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Enable Task" Command="{Binding EnableTaskCommand}" Visibility="{Binding ActionSurface.ShowEnableTask, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Disable Task" Command="{Binding DisableTaskCommand}" Visibility="{Binding ActionSurface.ShowDisableTask, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Remove Task" Command="{Binding RemoveTaskCommand}" Visibility="{Binding ActionSurface.ShowRemoveTask, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Refresh Status" Command="{Binding RefreshStatusCommand}" Visibility="{Binding ActionSurface.ShowRefreshStatus, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Cancel" Command="{Binding CancelOperationCommand}" Visibility="{Binding ActionSurface.ShowCancelOperation, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Prepare Shuttle" Command="{Binding PrepareShuttleCommand}" Visibility="{Binding ActionSurface.ShowPrepareShuttle, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Depart" Command="{Binding DepartShuttleCommand}" Visibility="{Binding ActionSurface.ShowDepartShuttle, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Dock Shuttle" Command="{Binding DockShuttleCommand}" Visibility="{Binding ActionSurface.ShowDockShuttle, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Content="Receive Changes" Command="{Binding ReceiveShuttleCommand}" Visibility="{Binding ActionSurface.ShowReceiveShuttle, Converter={StaticResource BoolToVisibilityConverter}}" />
+                    </StackPanel>
+                    <TextBox x:Name="OutputTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Text="{Binding OutputText}" />
                 </Grid>
             </Border>
         </Grid>
