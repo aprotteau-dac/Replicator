@@ -11,6 +11,8 @@ using Replicator.Core.Scripting;
 using Replicator.Core.Security;
 using Replicator.Core.Shuttle;
 using Replicator.Core.Storage;
+using Replicator.Presentation.Commands;
+using Replicator.Presentation.State;
 
 var tests = new List<(string Name, Func<Task> Test)>
 {
@@ -22,6 +24,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("log reader skips locked latest robocopy log", LogReaderSkipsLockedLatestRobocopyLog),
     ("status reader parses latest backup status", StatusReaderParsesLatestBackupStatus),
     ("status reader ignores malformed latest backup status", StatusReaderIgnoresMalformedLatestBackupStatus),
+    ("relay command executes when allowed", RelayCommandExecutesWhenAllowed),
+    ("async command disables while executing", AsyncCommandDisablesWhileExecuting),
+    ("status message ready is success", StatusMessageReadyIsSuccess),
     ("profile store round-trips JSON", ProfileStoreRoundTripsJson),
     ("shuttle prepare depart dock receive preserves conflicts", ShuttlePrepareDepartDockReceivePreservesConflicts),
     ("shuttle source enumeration prunes excluded directories", ShuttleSourceEnumerationPrunesExcludedDirectories),
@@ -98,6 +103,38 @@ if (failures > 0)
 
 Console.WriteLine($"{tests.Count} test(s) passed.");
 return 0;
+
+static Task RelayCommandExecutesWhenAllowed()
+{
+    var executed = false;
+    var command = new RelayCommand(() => executed = true, () => true);
+
+    Assert(command.CanExecute(null), "Expected command to be executable.");
+    command.Execute(null);
+
+    Assert(executed, "Expected relay command to execute action.");
+    return Task.CompletedTask;
+}
+
+static async Task AsyncCommandDisablesWhileExecuting()
+{
+    var release = new TaskCompletionSource();
+    var command = new AsyncCommand(async () => await release.Task);
+
+    var execution = command.ExecuteAsync();
+
+    Assert(!command.CanExecute(null), "Expected async command to disable while executing.");
+    release.SetResult();
+    await execution;
+    Assert(command.CanExecute(null), "Expected async command to re-enable after execution.");
+}
+
+static Task StatusMessageReadyIsSuccess()
+{
+    Assert(StatusMessage.Ready.Text == "Ready.", $"Unexpected ready text: {StatusMessage.Ready.Text}");
+    Assert(StatusMessage.Ready.Kind == StatusKind.Success, $"Unexpected ready kind: {StatusMessage.Ready.Kind}");
+    return Task.CompletedTask;
+}
 
 static Task ValidatorRejectsNestedDestination()
 {
