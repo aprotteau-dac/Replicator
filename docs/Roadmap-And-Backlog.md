@@ -21,7 +21,7 @@
 - **Drive identity over drive letters**: bind profiles to volume identity/label/serial metadata so `E:` becoming `F:` does not break profiles.
 - **Shuttle protect cadence**: add a dedicated scheduled shuttle-protect runner that writes manifests and respects pending inbound state, rather than reusing the backup robocopy runner.
 - **Shuttle as profile capability**: redesign profiles so a profile can run scheduled protect/backup behavior and also expose shuttle actions. The current `Backup` versus `Shuttle` split is a prototype simplification.
-- **Large shuttle performance**: first slices implemented. Shuttle file work now runs off the WPF UI thread with throttled file-count progress, stream hashing, hash-while-copy staging, timestamp-preserving payload copies, manifest file indexes, metadata fast-skip checks, manifest-hash fallback checks, and user-initiated cancellation. Remaining work: resumability and avoiding long operation output in a single text box.
+- **Large shuttle performance**: first slices implemented. Shuttle file work now runs off the UI thread with throttled file-count progress, stream hashing, hash-while-copy staging, timestamp-preserving payload copies, manifest file indexes, metadata fast-skip checks, manifest-hash fallback checks, and user-initiated cancellation. Remaining work: resumability and avoiding long operation output in a single text box.
 - **Job history and audit UI**: replace the results textbox with a tabular jobs view backed by SQLite or another lightweight local database. Every backup/shuttle/restore run should create an auditable job record with stats, logs, artifacts, and drill-down detail.
 - **Path drift compensation**: match shuttle pairs even when the local repo/folder moved or has a different intermediate path, using explicit pair ids, Git history/ref fingerprints, and content similarity.
 - **Git shuttle engine**: support external-drive bare Git remotes for sensitive repos so committed work can move through Git's conflict model without network remotes.
@@ -63,14 +63,6 @@ Fourth-pass winner: shuttle operation cancellation.
 
 Fifth-pass winner: minute-based scheduled tasks.
 
-## WinUI 3 Path
+## WinUI 3 Shell
 
-The current UI is WPF to keep the initial app simple and compatible with the local Windows scripting/task-scheduler workflow.
-
-A future WinUI 3 refactor should:
-
-- Keep backup profiles, script generation, scheduling, shuttle manifests, and log parsing in `Replicator.Core`.
-- Introduce view models that expose commands and observable state without referencing WPF types.
-- Create a new WinUI 3 presentation project that binds to those view models.
-- Replace the WPF theme dictionary with native WinUI 3 resources, AppWindow behavior, InfoBars, ProgressRing/ProgressBar, TeachingTips, and Fluent command surfaces.
-- Retire the WPF project after parity for profile editing, run status, logs, scheduled task management, and shuttle workflows.
+The desktop shell has moved from WPF to WinUI 3. Future UI work should build on `Replicator.Presentation` view models and keep Core behavior out of the WinUI code-behind.

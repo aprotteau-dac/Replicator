@@ -24,7 +24,7 @@ Shuttling about 6,500 files worked but caused major UI lockup in the first proto
 
 Initial mitigations now implemented:
 
-- shuttle file work runs off the WPF UI thread
+- shuttle file work runs off the UI thread
 - file-count progress is reported with throttled UI updates
 - user-initiated cancellation is wired through shuttle operations
 - hashing uses streams instead of whole-file reads
