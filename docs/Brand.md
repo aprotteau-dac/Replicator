@@ -18,13 +18,11 @@ Loaded dictionaries:
 
 ```text
 Theme.xaml
-Compatibility.xaml
-AppControls.xaml
 Icons.xaml
 Logo.xaml
 ```
 
-`Compatibility.xaml` maps the older WPF resource keys onto the brand tokens so the current app can migrate gradually. `AppControls.xaml` is the current WPF control bridge: it keeps existing controls dark, square, and branded while views are moved toward direct brand keys over time.
+The current WinUI shell uses WinUI-native theme, icon, and logo resources. The older WPF compatibility/control bridge dictionaries were removed during the WinUI 3 migration.
 
 The app icon uses:
 
@@ -42,6 +40,4 @@ src/Replicator.App/Themes/Brand/logo/replicator.ico
 
 ## Migration Notes
 
-The first integration is a hybrid path. The UI now uses the brand palette and mark, but not every view has been redesigned around the kit's native `Brush.*`, `Text.*`, `Button.*`, and `Icon.*` resources.
-
-Future UI work should prefer the brand keys directly and remove compatibility aliases when the WPF views no longer depend on the old theme contract.
+The WinUI shell now uses the brand palette and mark through native WinUI resource dictionaries. Future UI work should prefer the existing brand keys directly and keep new resources in `Theme.xaml`, `Icons.xaml`, or `Logo.xaml`.

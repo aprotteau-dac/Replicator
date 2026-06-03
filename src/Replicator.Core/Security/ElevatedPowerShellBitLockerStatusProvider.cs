@@ -57,15 +57,11 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
 
         Directory.CreateDirectory(_workingDirectory);
         var checkId = Guid.NewGuid().ToString("N");
-        var scriptPath = Path.Combine(_workingDirectory, $"bitlocker-check-{checkId}.ps1");
-        var launcherPath = Path.Combine(_workingDirectory, $"bitlocker-check-{checkId}.vbs");
         var requestsPath = Path.Combine(_workingDirectory, $"bitlocker-check-{checkId}-requests.json");
         var outputPath = Path.Combine(_workingDirectory, $"bitlocker-check-{checkId}.json");
 
         try
         {
-            await File.WriteAllTextAsync(scriptPath, BuildScript(), Encoding.UTF8, cancellationToken);
-            await File.WriteAllTextAsync(launcherPath, BuildLauncherScript(scriptPath, requestsPath, outputPath), Encoding.UTF8, cancellationToken);
             await File.WriteAllTextAsync(requestsPath, BuildRequestsJson(uniqueCandidates), Encoding.UTF8, cancellationToken);
 
             int exitCode;
@@ -75,11 +71,16 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
                 try
                 {
                     exitCode = await processRunner.RunAsync(
-                        "wscript.exe",
+                        WindowsPowerShellPath(),
                         [
-                            "//B",
-                            "//Nologo",
-                            launcherPath
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-WindowStyle",
+                            "Hidden",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-EncodedCommand",
+                            BuildEncodedCommand(requestsPath, outputPath)
                         ],
                         timeoutSource.Token);
                 }
@@ -126,8 +127,6 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
         }
         finally
         {
-            TryDelete(scriptPath);
-            TryDelete(launcherPath);
             TryDelete(requestsPath);
             TryDelete(outputPath);
         }
@@ -277,26 +276,18 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
             """;
     }
 
-    private static string BuildLauncherScript(string scriptPath, string requestsPath, string outputPath)
+    private static string BuildEncodedCommand(string requestsPath, string outputPath)
     {
-        return $$"""
-            Option Explicit
-
-            Dim shell
-            Dim powershellPath
-            Dim command
-            Dim exitCode
-
-            Set shell = CreateObject("WScript.Shell")
-            powershellPath = shell.ExpandEnvironmentStrings("%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe")
-            command = Quote(powershellPath) & " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Quote({{ToVbStringLiteral(scriptPath)}}) & " -RequestsPath " & Quote({{ToVbStringLiteral(requestsPath)}}) & " -OutputPath " & Quote({{ToVbStringLiteral(outputPath)}})
-            exitCode = shell.Run(command, 0, True)
-            WScript.Quit exitCode
-
-            Function Quote(value)
-                Quote = Chr(34) & Replace(value, Chr(34), Chr(34) & Chr(34)) & Chr(34)
-            End Function
-            """;
+        var command = string.Join(
+            Environment.NewLine,
+            [
+                "$helper = @'",
+                BuildScript(),
+                "'@",
+                $"& ([scriptblock]::Create($helper)) -RequestsPath {PowerShellSingleQuoted(requestsPath)} -OutputPath {PowerShellSingleQuoted(outputPath)}",
+                "exit $LASTEXITCODE"
+            ]);
+        return Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
     }
 
     private static string BuildRequestsJson(IEnumerable<DriveSecurityCandidate> candidates)
@@ -309,9 +300,17 @@ public sealed class ElevatedPowerShellBitLockerStatusProvider(
         return JsonSerializer.Serialize(requests);
     }
 
-    private static string ToVbStringLiteral(string value)
+    private static string PowerShellSingleQuoted(string value)
     {
-        return $"\"{value.Replace("\"", "\"\"")}\"";
+        return $"'{value.Replace("'", "''")}'";
+    }
+
+    private static string WindowsPowerShellPath()
+    {
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return string.IsNullOrWhiteSpace(windowsDirectory)
+            ? "powershell.exe"
+            : Path.Combine(windowsDirectory, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     }
 
     private static bool ReadBool(JsonElement element, string propertyName)

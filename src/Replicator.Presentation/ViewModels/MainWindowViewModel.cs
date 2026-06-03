@@ -24,7 +24,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly BackupLogReader _logReader;
     private readonly BackupRunStatusReader _runStatusReader;
     private readonly IProcessRunner _processRunner;
-    private readonly ShuttleService _shuttleService;
+    private readonly IShuttleService _shuttleService;
     private readonly IScheduledTaskService _scheduledTasks;
     private readonly IScheduledTaskInventoryService _taskInventoryService;
     private readonly Replicator.Presentation.Services.IFolderPicker _folderPicker;
@@ -58,7 +58,7 @@ public sealed class MainWindowViewModel : ObservableObject
         PowerShellScriptGenerator scriptGenerator,
         BackupLogReader logReader,
         BackupRunStatusReader runStatusReader,
-        ShuttleService shuttleService,
+        IShuttleService shuttleService,
         IProcessRunner processRunner,
         IScheduledTaskService scheduledTasks,
         IScheduledTaskInventoryService taskInventoryService,
@@ -171,6 +171,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 _currentTaskSnapshot = null;
                 LoadProfileIntoState(value);
                 RecalculateActionSurface();
+                RaiseCommandStatesChanged();
             }
         }
     }
@@ -393,18 +394,29 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task RunShuttleAsync(
         Func<BackupProfile, IProgress<ShuttleOperationProgress>, CancellationToken, Task<ShuttleOperationResult>> operation)
     {
-        if (!TryApplyForm(out var profile))
+        await RunBusyAsync("Running shuttle operation...", async cancellationToken =>
         {
-            return;
-        }
+            if (!TryApplyForm(out var profile))
+            {
+                return;
+            }
 
-        await _profileStore.UpsertAsync(profile);
-        ShowAvailability(_availabilityChecker.Check(profile));
-        var progress = new Progress<ShuttleOperationProgress>(ShowShuttleProgress);
-        var result = await operation(profile, progress, CancellationToken.None);
-        OutputText = result.ToDisplayString();
-        ShowStatus(result.Message, result.Succeeded);
-        RecalculateActionSurface();
+            await _profileStore.UpsertAsync(profile);
+            ShowAvailability(_availabilityChecker.Check(profile));
+            var acceptProgress = true;
+            var progress = new Progress<ShuttleOperationProgress>(progress =>
+            {
+                if (acceptProgress)
+                {
+                    ShowShuttleProgress(progress);
+                }
+            });
+            var result = await Task.Run(() => operation(profile, progress, cancellationToken), cancellationToken);
+            acceptProgress = false;
+            OutputText = result.ToDisplayString();
+            ShowStatus(result.Message, result.Succeeded);
+            RecalculateActionSurface();
+        }, canCancel: true);
     }
 
     private async Task<TaskOperationResult> InstallOrUpdateTaskForProfileAsync(BackupProfile profile)
@@ -770,7 +782,7 @@ public sealed class MainWindowViewModel : ObservableObject
         IsBusy = busy;
         CanCancel = busy && _currentOperationCancellationSource is not null && !_currentOperationCancellationSource.IsCancellationRequested;
         RecalculateActionSurface();
-        CancelOperationCommand.RaiseCanExecuteChanged();
+        RaiseCommandStatesChanged();
 
         if (busy)
         {
@@ -780,11 +792,38 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void CancelOperation()
     {
+        ShowStatus("Cancellation requested...", succeeded: false);
         _currentOperationCancellationSource?.Cancel();
         CanCancel = false;
         RecalculateActionSurface();
+        RaiseCommandStatesChanged();
+    }
+
+    private void RaiseCommandStatesChanged()
+    {
+        LoadCommand.RaiseCanExecuteChanged();
+        NewProfileCommand.RaiseCanExecuteChanged();
+        DeleteProfileCommand.RaiseCanExecuteChanged();
+        BrowseSourceCommand.RaiseCanExecuteChanged();
+        BrowseDestinationCommand.RaiseCanExecuteChanged();
+        SaveProfileCommand.RaiseCanExecuteChanged();
+        GenerateScriptCommand.RaiseCanExecuteChanged();
+        InstallTaskCommand.RaiseCanExecuteChanged();
+        PreviewDryRunCommand.RaiseCanExecuteChanged();
+        RunNowCommand.RaiseCanExecuteChanged();
+        EnableTaskCommand.RaiseCanExecuteChanged();
+        DisableTaskCommand.RaiseCanExecuteChanged();
+        RemoveTaskCommand.RaiseCanExecuteChanged();
+        StartScheduledTaskCommand.RaiseCanExecuteChanged();
+        RefreshStatusCommand.RaiseCanExecuteChanged();
+        ReviewTaskInventoryCommand.RaiseCanExecuteChanged();
+        RepairSelectedInventoryTaskCommand.RaiseCanExecuteChanged();
+        CheckDriveSecurityAsAdminCommand.RaiseCanExecuteChanged();
+        PrepareShuttleCommand.RaiseCanExecuteChanged();
+        DepartShuttleCommand.RaiseCanExecuteChanged();
+        DockShuttleCommand.RaiseCanExecuteChanged();
+        ReceiveShuttleCommand.RaiseCanExecuteChanged();
         CancelOperationCommand.RaiseCanExecuteChanged();
-        ShowStatus("Cancellation requested...", succeeded: false);
     }
 
     private void ShowShuttleProgress(ShuttleOperationProgress progress)

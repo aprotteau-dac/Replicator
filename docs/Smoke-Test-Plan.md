@@ -52,8 +52,8 @@ This gate covers:
 3. Use Browse for source and destination and cancel once.
 4. Open Review Tasks when no tasks exist or when existing Replicator tasks are present.
 5. Run Preview Dry Run for a dry-run profile.
-- elevated BitLocker batch verification behavior
-- profile drive-security summary behavior
+6. Run Check as Admin when BitLocker status requires elevated verification.
+7. Confirm the profile drive-security summary returns to a non-elevated ready state.
 
 Optional long shuttle smoke:
 

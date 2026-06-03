@@ -34,7 +34,7 @@ public sealed class TaskInventoryViewModel : ObservableObject
             ?? inventory?.Summary.ToDisplayString()
             ?? "Scheduled tasks not checked.";
         HasIssues = inventory?.Summary.HasIssues == true;
-        IsActionCenterVisible = selectedIssue is not null;
+        IsActionCenterVisible = HasIssues;
     }
 
     public void OpenReview()
