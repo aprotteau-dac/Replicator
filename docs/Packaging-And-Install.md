@@ -40,6 +40,8 @@ artifacts\package\Replicator-0.1.0-win-x64\
 artifacts\package\Replicator-0.1.0-win-x64.zip
 ```
 
+The package also includes `replicator.ico` as a standalone shortcut icon. Installer-created shortcuts use that icon instead of asking Windows Explorer to extract an icon from the self-contained app executable.
+
 ## Install From Package
 
 Install from the unpacked package:
@@ -53,6 +55,8 @@ Default install location:
 ```text
 %LOCALAPPDATA%\Programs\Replicator
 ```
+
+By default the installer creates Start Menu and Desktop shortcuts that target `Replicator.App.exe` and use the packaged `replicator.ico`.
 
 Skip desktop shortcut:
 

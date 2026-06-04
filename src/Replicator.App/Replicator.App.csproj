@@ -16,6 +16,7 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Themes\Brand\logo\replicator.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>

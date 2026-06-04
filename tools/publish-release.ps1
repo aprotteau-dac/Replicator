@@ -12,6 +12,7 @@ $artifactsRoot = Join-Path $repoRoot "artifacts"
 $publishRoot = Join-Path $artifactsRoot "publish"
 $packageRoot = Join-Path $artifactsRoot "package"
 $appProject = Join-Path $repoRoot "src\Replicator.App\Replicator.App.csproj"
+$appIcon = Join-Path $repoRoot "src\Replicator.App\Themes\Brand\logo\replicator.ico"
 $publishDir = Join-Path $publishRoot "Replicator-$Version-$Runtime"
 $packageDir = Join-Path $packageRoot "Replicator-$Version-$Runtime"
 $zipPath = Join-Path $packageRoot "Replicator-$Version-$Runtime.zip"
@@ -65,6 +66,7 @@ New-Item -ItemType Directory -Force $packageDir | Out-Null
 Copy-Item -Path (Join-Path $publishDir "*") -Destination $packageDir -Recurse -Force
 Copy-Item -Path (Join-Path $PSScriptRoot "install-replicator.ps1") -Destination $packageDir -Force
 Copy-Item -Path (Join-Path $PSScriptRoot "uninstall-replicator.ps1") -Destination $packageDir -Force
+Copy-Item -Path $appIcon -Destination (Join-Path $packageDir "replicator.ico") -Force
 Copy-Item -Path (Join-Path $repoRoot "README.md") -Destination $packageDir -Force
 Copy-Item -Path (Join-Path $repoRoot "LICENSE") -Destination $packageDir -Force
 

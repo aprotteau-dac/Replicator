@@ -47,6 +47,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("save profile applies form and persists selected profile", SaveProfileAppliesFormAndPersistsSelectedProfile),
     ("generate script applies form persists profile and appends generated script path", GenerateScriptAppliesFormPersistsProfileAndAppendsGeneratedScriptPath),
     ("install task writes script installs task and refreshes inventory", InstallTaskWritesScriptInstallsTaskAndRefreshesInventory),
+    ("winui app embeds per-monitor dpi awareness manifest", WinUiAppEmbedsPerMonitorDpiAwarenessManifest),
+    ("release package includes standalone shortcut ico", ReleasePackageIncludesStandaloneShortcutIcon),
+    ("installer shortcuts use packaged ico instead of app exe icon extraction", InstallerShortcutsUsePackagedIcon),
     ("preview dry run applies form and invokes powershell with dry run switch", PreviewDryRunAppliesFormAndInvokesPowerShellWithDryRunSwitch),
     ("run now applies form and invokes powershell without dry run switch", RunNowAppliesFormAndInvokesPowerShellWithoutDryRunSwitch),
     ("enable task calls scheduled service and refreshes inventory", EnableTaskCallsScheduledServiceAndRefreshesInventory),
@@ -3059,6 +3062,122 @@ static string BuildElevatedBitLockerEncodedCommand(string requestsPath, string o
 static string PowerShellSingleQuoted(string value)
 {
     return $"'{value.Replace("'", "''")}'";
+}
+
+static Task WinUiAppEmbedsPerMonitorDpiAwarenessManifest()
+{
+    var projectPath = Path.Combine(Environment.CurrentDirectory, "src", "Replicator.App", "Replicator.App.csproj");
+    var project = XDocument.Load(projectPath);
+    var projectNamespace = project.Root?.Name.Namespace ?? XNamespace.None;
+    var manifestProperty = project.Descendants(projectNamespace + "ApplicationManifest")
+        .SingleOrDefault()
+        ?.Value
+        .Trim();
+
+    Assert(string.Equals(manifestProperty, "app.manifest", StringComparison.OrdinalIgnoreCase), "Expected the WinUI app project to embed app.manifest.");
+
+    manifestProperty ??= string.Empty;
+    var manifestPath = Path.Combine(Path.GetDirectoryName(projectPath)!, manifestProperty);
+    Assert(File.Exists(manifestPath), $"Expected WinUI app manifest at {manifestPath}.");
+
+    var manifest = XDocument.Load(manifestPath);
+    XNamespace dpi2016 = "http://schemas.microsoft.com/SMI/2016/WindowsSettings";
+    XNamespace dpi2005 = "http://schemas.microsoft.com/SMI/2005/WindowsSettings";
+    var dpiAwareness = manifest.Descendants(dpi2016 + "dpiAwareness")
+        .SingleOrDefault()
+        ?.Value;
+    var dpiAware = manifest.Descendants(dpi2005 + "dpiAware")
+        .SingleOrDefault()
+        ?.Value
+        .Trim();
+
+    var awarenessModes = (dpiAwareness ?? string.Empty)
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    Assert(awarenessModes.Any(mode => string.Equals(mode, "PerMonitorV2", StringComparison.OrdinalIgnoreCase)), "Expected app manifest to declare PerMonitorV2 DPI awareness.");
+    Assert(string.Equals(dpiAware, "true/pm", StringComparison.OrdinalIgnoreCase), "Expected app manifest to include true/pm fallback DPI awareness.");
+
+    return Task.CompletedTask;
+}
+
+static async Task ReleasePackageIncludesStandaloneShortcutIcon()
+{
+    var scriptPath = Path.Combine(Environment.CurrentDirectory, "tools", "publish-release.ps1");
+    var script = await File.ReadAllTextAsync(scriptPath);
+
+    Assert(script.Contains("Themes\\Brand\\logo\\replicator.ico", StringComparison.OrdinalIgnoreCase), "Expected release packaging to copy the source shortcut icon.");
+    Assert(script.Contains("replicator.ico", StringComparison.OrdinalIgnoreCase), "Expected package to include a standalone replicator.ico asset.");
+}
+
+static async Task InstallerShortcutsUsePackagedIcon()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
+    var packageDir = Path.Combine(root, "package");
+    var installDir = Path.Combine(root, "install");
+    var appData = Path.Combine(root, "appdata");
+    var localAppData = Path.Combine(root, "localappdata");
+
+    Directory.CreateDirectory(packageDir);
+    Directory.CreateDirectory(appData);
+    Directory.CreateDirectory(localAppData);
+
+    var installerSource = Path.Combine(Environment.CurrentDirectory, "tools", "install-replicator.ps1");
+    var installerPath = Path.Combine(packageDir, "install-replicator.ps1");
+    File.Copy(installerSource, installerPath);
+
+    var iconSource = Path.Combine(Environment.CurrentDirectory, "src", "Replicator.App", "Themes", "Brand", "logo", "replicator.ico");
+    var packageIcon = Path.Combine(packageDir, "replicator.ico");
+    File.Copy(iconSource, packageIcon);
+    await File.WriteAllTextAsync(Path.Combine(packageDir, "Replicator.App.exe"), "fake executable for installer shortcut tests");
+
+    var startInfo = new ProcessStartInfo("powershell.exe")
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+    };
+
+    startInfo.ArgumentList.Add("-NoProfile");
+    startInfo.ArgumentList.Add("-ExecutionPolicy");
+    startInfo.ArgumentList.Add("Bypass");
+    startInfo.ArgumentList.Add("-File");
+    startInfo.ArgumentList.Add(installerPath);
+    startInfo.ArgumentList.Add("-InstallDir");
+    startInfo.ArgumentList.Add(installDir);
+    startInfo.ArgumentList.Add("-NoDesktopShortcut");
+    startInfo.Environment["APPDATA"] = appData;
+    startInfo.Environment["LOCALAPPDATA"] = localAppData;
+
+    using var process = Process.Start(startInfo)
+        ?? throw new InvalidOperationException("Failed to start installer test process.");
+
+    var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+    var standardErrorTask = process.StandardError.ReadToEndAsync();
+    await process.WaitForExitAsync();
+
+    var standardOutput = await standardOutputTask;
+    var standardError = await standardErrorTask;
+    Assert(process.ExitCode == 0, $"Installer test failed with exit code {process.ExitCode}. stdout: {standardOutput} stderr: {standardError}");
+
+    var shortcutPath = Path.Combine(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Replicator", "Replicator.lnk");
+    Assert(File.Exists(shortcutPath), $"Expected installer to create Start Menu shortcut at {shortcutPath}.");
+
+    var inspectCommand = "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut(" +
+        PowerShellSingleQuoted(shortcutPath) +
+        "); $shortcut.IconLocation";
+    var inspect = await RunWindowsPowerShellAsync(inspectCommand);
+    Assert(inspect.ExitCode == 0, $"Shortcut inspection failed with exit code {inspect.ExitCode}. stderr: {inspect.StandardError}");
+
+    var expectedIcon = Path.Combine(installDir, "replicator.ico");
+    var iconLocation = inspect.StandardOutput.Trim();
+    var iconPath = iconLocation.Split(',', 2)[0].Trim();
+    Assert(string.Equals(iconPath, expectedIcon, StringComparison.OrdinalIgnoreCase), $"Expected shortcut icon to be {expectedIcon}, got {iconLocation}.");
+    Assert(!iconLocation.Contains("Replicator.App.exe", StringComparison.OrdinalIgnoreCase), $"Shortcut should not ask Explorer to extract icons from the app exe: {iconLocation}");
 }
 
 static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunWindowsPowerShellAsync(string command)

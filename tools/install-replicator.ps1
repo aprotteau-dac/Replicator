@@ -14,7 +14,8 @@ function New-Shortcut {
         [string] $TargetPath,
         [Parameter(Mandatory = $true)]
         [string] $WorkingDirectory,
-        [string] $Description = ""
+        [string] $Description = "",
+        [string] $IconLocation = ""
     )
 
     $shell = New-Object -ComObject WScript.Shell
@@ -22,12 +23,15 @@ function New-Shortcut {
     $shortcut.TargetPath = $TargetPath
     $shortcut.WorkingDirectory = $WorkingDirectory
     $shortcut.Description = $Description
-    $shortcut.IconLocation = $TargetPath
+    if (-not [string]::IsNullOrWhiteSpace($IconLocation)) {
+        $shortcut.IconLocation = $IconLocation
+    }
     $shortcut.Save()
 }
 
 $sourceDir = $PSScriptRoot
 $exeName = "Replicator.App.exe"
+$iconName = "replicator.ico"
 $sourceExe = Join-Path $sourceDir $exeName
 
 if (-not (Test-Path $sourceExe)) {
@@ -49,6 +53,8 @@ Get-ChildItem -LiteralPath $sourceDir -Force |
     }
 
 $installedExe = Join-Path $installDirResolved $exeName
+$installedIcon = Join-Path $installDirResolved $iconName
+$shortcutIcon = if (Test-Path -LiteralPath $installedIcon) { $installedIcon } else { "" }
 $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Replicator"
 $desktopDir = [Environment]::GetFolderPath("DesktopDirectory")
 
@@ -59,14 +65,16 @@ if (-not $NoShortcuts) {
         -ShortcutPath (Join-Path $startMenuDir "Replicator.lnk") `
         -TargetPath $installedExe `
         -WorkingDirectory $installDirResolved `
-        -Description "Replicator backup and shuttle control"
+        -Description "Replicator backup and shuttle control" `
+        -IconLocation $shortcutIcon
 
     if (-not $NoDesktopShortcut) {
         New-Shortcut `
             -ShortcutPath (Join-Path $desktopDir "Replicator.lnk") `
             -TargetPath $installedExe `
             -WorkingDirectory $installDirResolved `
-            -Description "Replicator backup and shuttle control"
+            -Description "Replicator backup and shuttle control" `
+            -IconLocation $shortcutIcon
     }
 }
 

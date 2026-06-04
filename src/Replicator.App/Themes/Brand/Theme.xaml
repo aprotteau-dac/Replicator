@@ -6,14 +6,14 @@
     <Color x:Key="Color.Bg.Raise">#1F1C19</Color>
     <Color x:Key="Color.Bg.RaisePlus">#272320</Color>
     <Color x:Key="Color.Ink.Bone">#F0E9D3</Color>
-    <Color x:Key="Color.Ink.BoneMute">#99F0E9D3</Color>
-    <Color x:Key="Color.Ink.BoneDim">#52F0E9D3</Color>
+    <Color x:Key="Color.Ink.BoneMute">#B8F0E9D3</Color>
+    <Color x:Key="Color.Ink.BoneDim">#80F0E9D3</Color>
     <Color x:Key="Color.Red.Primary">#D23A2A</Color>
     <Color x:Key="Color.Red.Deep">#5A1810</Color>
     <Color x:Key="Color.Status.Alarm">#FFB35C</Color>
     <Color x:Key="Color.Status.Info">#A8B8C4</Color>
-    <Color x:Key="Color.Line">#14F0E9D3</Color>
-    <Color x:Key="Color.Line.Hi">#2EF0E9D3</Color>
+    <Color x:Key="Color.Line">#22F0E9D3</Color>
+    <Color x:Key="Color.Line.Hi">#3DF0E9D3</Color>
 
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource Color.Bg.Floor}" />
     <SolidColorBrush x:Key="PanelBackgroundBrush" Color="{StaticResource Color.Bg.Panel}" />
