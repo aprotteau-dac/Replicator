@@ -1,5 +1,28 @@
 # Architecture Notes
 
+## Platform Split
+
+`Replicator.Core`, `Replicator.Presentation`, and `Replicator.Tests` target `net10.0` and build and
+test on Linux (and any other platform the .NET 10 SDK supports). `Replicator.App` targets
+`net10.0-windows` with WinUI and is Windows-only, so `dotnet build Replicator.sln` cannot succeed
+off Windows — the WinUI project simply won't build there.
+
+The test harness (`tests/Replicator.Tests`) knows this: tests that can only run on Windows (they
+shell out to `powershell.exe`, BitLocker, or drive-security elevation) are wrapped with
+`PlatformGate.WindowsOnly`. On Windows they execute normally. On other platforms they print
+`SKIP <name>` instead of running and are not counted as failures.
+
+To build and run the suite in a container or on Linux/macOS CI, target the test project directly
+rather than the solution:
+
+```sh
+dotnet build tests/Replicator.Tests/Replicator.Tests.csproj
+dotnet run --project tests/Replicator.Tests/Replicator.Tests.csproj
+```
+
+This pulls in `Replicator.Core` and `Replicator.Presentation` through project references without
+touching `Replicator.App`.
+
 ## Shuttle Should Be Additive
 
 The current prototype models `Backup` and `Shuttle` as separate profile modes. Field testing showed that this is the wrong long-term shape.
