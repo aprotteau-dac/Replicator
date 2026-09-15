@@ -16,6 +16,7 @@ internal static class AuditTests
         ("audit imports logs and enriches exact latest job idempotently", ImportAndEnrichment),
         ("audit preserves uncertainty and orphaned historical snapshots", UncertainAndOrphaned),
         ("audit skips malformed locked and unrelated artifacts independently", BadArtifacts),
+        ("audit rejects oversized status before reading its contents", OversizedStatusSkipsContentRead),
         ("audit import rollback leaves artifacts eligible for retry", ImportRollback),
         ("audit import does not duplicate or override app jobs", AppImportDeduplication),
         ("audit events preserve all correlation fields", EventCorrelation),
@@ -70,6 +71,33 @@ internal static class AuditTests
     {
         var store = new SqliteAuditStore(paths.DatabaseFile);
         new AuditImporter(store, paths.LogsDirectory, store.WriteEvent).Import(profiles);
+    }
+
+    private static Task OversizedStatusSkipsContentRead()
+    {
+        var paths = Paths();
+        var profile = Profile();
+        Log(paths, profile);
+        var statusPath = Path.Combine(paths.LogsDirectory, PowerShellScriptGenerator.ProfileSlug(profile) + "-latest.json");
+        using (var file = File.Create(statusPath)) file.SetLength(1024 * 1024 + 1);
+
+        // Windows byte-range locking allows metadata access but makes any content read fail.
+        // The size guard must reject this file before hashing attempts such a read.
+        using var locked = new FileStream(statusPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        locked.Lock(0, locked.Length);
+        try
+        {
+            var events = new List<AuditSystemEvent>();
+            var store = new SqliteAuditStore(paths.DatabaseFile);
+            new AuditImporter(store, paths.LogsDirectory, events.Add).Import([profile]);
+            Check(events.Any(entry => entry.Code == "import.artifact_skipped" &&
+                entry.Details?.Contains("Status file exceeds 1 MB.") == true),
+                "Oversized status content was read before its size was rejected.");
+            Check(Convert.ToInt64(Scalar(paths, "SELECT COUNT(*) FROM jobs")) == 1, "Oversized status blocked log import.");
+            Check(Convert.ToInt64(Scalar(paths, "SELECT COUNT(*) FROM import_sources")) == 1, "Rejected status was marked imported.");
+        }
+        finally { locked.Unlock(0, locked.Length); }
+        return Task.CompletedTask;
     }
 
     private static Task SchemaAndJobs()

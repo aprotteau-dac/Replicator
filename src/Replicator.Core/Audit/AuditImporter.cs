@@ -54,13 +54,13 @@ public sealed class AuditImporter(SqliteAuditStore store, string logsDirectory, 
         var fullPath = Path.GetFullPath(path);
         using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var size = stream.Length;
+        if (enrichment && size > 1024 * 1024) throw new InvalidDataException("Status file exceeds 1 MB.");
         var write = new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath));
         var hash = Convert.ToHexString(SHA256.HashData(stream));
         stream.Position = 0;
         AuditJob job;
         if (enrichment)
         {
-            if (size > 1024 * 1024) throw new InvalidDataException("Status file exceeds 1 MB.");
             var status = JsonSerializer.Deserialize<BackupRunStatus>(stream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                 ?? throw new InvalidDataException("Empty status JSON.");
             if (string.IsNullOrWhiteSpace(status.LogPath) || !Path.IsPathFullyQualified(status.LogPath))
