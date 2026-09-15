@@ -23,7 +23,7 @@ internal static class AuditTests
         ("audit fallback rotates within its size bound and recovers", FallbackAndRecovery),
         ("audit shuttle stores bounded counters and linked manifests", ShuttleCapture),
         ("audit imports multiple batches without storing verbose log bodies", MultipleBatches),
-        ("audit generated PowerShell preserves exact app log and status evidence", GeneratedScriptCapture),
+        ("audit generated PowerShell preserves exact app log and status evidence", PlatformGate.WindowsOnly(GeneratedScriptCapture)),
         ("audit database lock falls back and recovers", DatabaseLock)
     ];
 
