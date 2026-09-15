@@ -84,7 +84,8 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
         return $$"""
             [CmdletBinding()]
             param(
-                [switch] $DryRun
+                [switch] $DryRun,
+                [string] $RunLogPath
             )
 
             Set-StrictMode -Version Latest
@@ -101,7 +102,7 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
 
             function Write-RunLog {
                 param([string] $Message)
-                $line = '{0:u} {1}' -f (Get-Date), $Message
+                $line = '{0:u} {1}' -f (Get-Date).ToUniversalTime(), $Message
                 Write-Host $line
                 if ($null -ne $LogPath -and (Test-Path -LiteralPath $LogPath)) {
                     Add-Content -LiteralPath $LogPath -Value $line
@@ -148,6 +149,9 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
             $StartedAt = Get-Date
             $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
             $LogPath = Join-Path $LogDirectory ("{0}-{1}.log" -f $ProfileSlug, $timestamp)
+            if ($RunLogPath) {
+                $LogPath = $RunLogPath
+            }
             $StatusPath = Join-Path $LogDirectory ("{0}-latest.json" -f $ProfileSlug)
             $effectiveDryRun = [bool] $DryRun -or [bool] $DryRunFromProfile
             $RunMode = if ($effectiveDryRun) { 'Dry run - no files will be copied' } else { 'Copy - files may be copied' }
@@ -158,7 +162,7 @@ public sealed class PowerShellScriptGenerator(string scriptsDirectory, string lo
                 "Mode: $RunMode",
                 "Source: $Source",
                 "Destination: $Destination",
-                "Started: $($StartedAt.ToString('u'))",
+                "Started: $($StartedAt.ToUniversalTime().ToString('u'))",
                 "Mirror deletes: $MirrorDeletes",
                 "Excludes: $($ExcludePatterns -join ', ')",
                 ''

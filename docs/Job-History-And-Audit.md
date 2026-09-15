@@ -1,121 +1,51 @@
 # Job History And Audit
 
-The current results window is a prototype text output surface. It should become a tabular job history and audit view.
+## Implemented Storage Foundation
 
-## Target Experience
+Replicator keeps a local SQLite audit ledger at `%LOCALAPPDATA%\Replicator\replicator.db`.
 
-Every run should create a durable job record that can be reviewed later.
+The Core-owned store records app-launched backups, dry-run previews, and prepare/depart/dock/receive shuttle operations. Jobs include a profile snapshot, operation, outcome, UTC times, elapsed time, counters, bounded summaries/errors, and links to log, script, or manifest artifacts. User cancellation is recorded as `canceled`. Each app backup receives a unique log filename.
 
-The UI should show a table with:
+`profiles.json` remains the profile registry. Deleting a profile clears the current profile reference in its jobs, preserving snapshots and evidence. Renaming a profile does not rewrite historical names or paths.
 
-- job id
-- profile name
-- profile mode/capability
-- operation type: backup, dry run, prepare shuttle, depart, dock, receive, restore
-- status: queued, running, succeeded, failed, canceled, skipped
-- source path
-- target/shuttle path
-- started time
-- completed time
-- elapsed time
-- files scanned
-- files copied
-- files skipped
-- files changed
-- conflicts
-- bytes copied
-- error summary
+The schema has `schema_metadata`, `jobs`, `job_events`, `job_artifacts`, `system_events`, and `import_sources`. Schema version 1 initializes transactionally and can be reopened repeatedly. A newer unsupported schema is left untouched; normal operations continue through the fallback path.
 
-Clicking a row should open a detail view with:
+System events cover startup, storage initialization/migration, profile save/delete, script generation, scheduled task actions and repairs, BitLocker check failures, and import batches. Events carry optional job, profile, artifact, and batch correlation fields.
 
-- full log tail
-- manifest path
-- generated script path, when applicable
-- task scheduler result, when applicable
-- source/target availability checks
-- conflict files and preserved-copy locations
-- raw engine output
+## Historical And Scheduled Runs
 
-## Storage
+After profiles load, and on explicit status refresh, a background importer scans the logs directory. It streams file hashes and log parsing, commits batches of up to 32 artifacts, and summarizes duplicate skips per batch. Import does not hold a database transaction while reading files or block the UI thread.
 
-Use a lightweight local database rather than only JSON/log files.
+- Timestamped Replicator logs are primary historical evidence. Headers supply historical profile details; the stable ID suffix can match a renamed profile.
+- A matching `*-latest.json` enriches only the job for its exact log path. It cannot reconstruct overwritten history or create jobs by itself.
+- Canonical path, size, last-write UTC, and SHA-256 fingerprints make repeated scans idempotent. Changed files are processed again, updating their existing job.
+- Malformed, locked, and unreadable artifacts are skipped independently and retried on a later scan. A database write failure rolls back its batch, leaving artifacts eligible for retry.
+- Explicit outcomes are retained; incomplete logs remain `unknown`, and summary-only completion remains `completed_unverified`. Unknown timestamps and counters stay null/absent.
+- App jobs reserve their log path before launch, so importing their logs does not duplicate those jobs or override their direct outcomes.
 
-Candidate: SQLite.
+Generated Task Scheduler scripts continue writing logs and status JSON. They do not load SQLite. Scheduled runs appear in the ledger when the app next imports their artifacts.
 
-Reasons:
+`process_exit_code` is the app-launched process result. `robocopy_exit_code` comes from an explicit robocopy completion/failure message. `reported_exit_code` comes from status JSON and can represent a script preflight failure instead of robocopy. These are kept separate.
 
-- single local file
-- easy backup
-- enough query power for history, filtering, and audit
-- works well with WPF/.NET
-- avoids inventing an ad hoc log index format
+## Failure Handling And Data
 
-Proposed location:
+Storage is best effort. Backups, previews, shuttle operations, scheduling, and the current latest-log display continue when SQLite is unavailable. Storage failures and the original system event are written to `%LOCALAPPDATA%\Replicator\logs\system-events-fallback.log`.
 
-```text
-%LOCALAPPDATA%\Replicator\replicator.db
-```
+The diagnostic file rotates before exceeding 1 MB, keeping one previous `system-events-fallback.1.log`. Failure of this sink also cannot block an operation. Recovery is logged when storage becomes available; fallback events are not replayed into SQLite.
 
-## Initial Schema Sketch
+The database contains local metadata, including profile names and filesystem paths. It does not store full verbose log bodies or shuttle manifest file lists. Full logs and manifests remain linked file artifacts. Removing an artifact does not erase its job or last-observed metadata. Script and latest-status paths are mutable artifacts; snapshots and stored outcomes preserve the run's context.
 
-```text
-profiles
-  id
-  name
-  source_path
-  target_path
-  created_at
-  updated_at
+Default uninstall preserves application data. `uninstall-replicator.ps1 -RemoveAppData` removes the entire local Replicator data directory, including the database and fallback diagnostics. Close Replicator before copying or removing its database.
 
-jobs
-  id
-  profile_id
-  operation
-  status
-  source_path
-  target_path
-  started_at
-  completed_at
-  elapsed_ms
-  files_scanned
-  files_copied
-  files_skipped
-  files_changed
-  conflicts
-  bytes_copied
-  log_path
-  manifest_path
-  script_path
-  error_summary
+## Follow-Up UI Work
 
-job_events
-  id
-  job_id
-  timestamp
-  level
-  message
+The current output textbox and latest-run summary remain in place. This slice does not add a job-history screen.
 
-job_artifacts
-  id
-  job_id
-  kind
-  path
-  description
-```
+Remaining work:
 
-## Implementation Notes
+- A jobs table and detail pane, with filters by profile, operation, status, and date.
+- Export of selected job evidence and richer audit drill-down.
+- Restore workflows and additional operation types as those features arrive.
+- Optional direct PowerShell database writes, service/tray logging, and fallback replay.
 
-- Every operation should create a job row before doing work.
-- Long-running operations should update progress counters during execution.
-- The UI should bind to job summaries, not append all output to one text box.
-- The detail view can still show raw logs, but logs should be linked artifacts, not the only source of truth.
-- Scheduled task scripts should write structured job status back to the database or to an ingestible JSON status file that the app imports.
-
-## Backlog
-
-- Add `Replicator.Data` or equivalent storage layer.
-- Add SQLite dependency and migration/versioning strategy.
-- Replace output textbox with a jobs table.
-- Add job detail pane.
-- Add filters by profile, operation, status, and date.
-- Add export for selected job logs/manifests.
+See the [storage design](superpowers/specs/2026-06-10-job-history-audit-storage-design.md) for the agreed scope.

@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Xml.Linq;
 using Replicator.Core;
+using Replicator.Core.Audit;
 using Replicator.Core.Execution;
 using Replicator.Core.Availability;
 using Replicator.Core.Models;
@@ -115,6 +116,11 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
 };
 
+tests.AddRange(AuditTests.Cases);
+tests.Add(("audit capture failure does not block backup execution", AuditFailureDoesNotBlockBackup));
+tests.Add(("audit records canceled shuttle job from view model", AuditRecordsCanceledShuttle));
+tests.Add(("audit records app backup and preview with separate artifacts", AuditRecordsBackupAndPreview));
+
 if (Environment.GetEnvironmentVariable("REPLICATOR_LONG_SHUTTLE_SMOKE") == "1")
 {
     tests.Add(("long shuttle manifest smoke handles 6500 skipped files", ShuttleLongManifestSmokeHandles6500SkippedFiles));
@@ -145,6 +151,50 @@ if (failures > 0)
 
 Console.WriteLine($"{tests.Count} test(s) passed.");
 return 0;
+
+static async Task AuditFailureDoesNotBlockBackup()
+{
+    var paths = AuditTests.Paths();
+    Directory.CreateDirectory(paths.DatabaseFile);
+    var profile = ValidProfile(); profile.SourcePath = paths.RootDirectory;
+    profile.Target.Path = Path.Combine(paths.RootDirectory, "..", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(profile.Target.Path);
+    var runner = new FakeProcessRunner(new(0, "ran despite storage failure", ""));
+    var vm = CreateMainWindowViewModel([profile], processRunner: runner, audit: new AuditService(paths));
+    await vm.LoadAsync(); await vm.AuditImportTask;
+    await vm.RunNowCommand.ExecuteAsync();
+    Assert(runner.LastArguments.Contains("-RunLogPath"), "Backup did not execute when audit registration failed.");
+    Assert(vm.OutputText.Contains("ran despite storage failure"), "File-based behavior was blocked by audit failure.");
+    Assert(File.Exists(paths.FallbackLogFile), "Audit failure has no fallback diagnostic.");
+}
+
+static async Task AuditRecordsCanceledShuttle()
+{
+    var paths = AuditTests.Paths(); var profile = ValidProfile(); profile.Mode = ProfileMode.Shuttle;
+    var shuttle = new BlockingShuttleService();
+    var vm = CreateMainWindowViewModel([profile], shuttleService: shuttle, audit: new AuditService(paths));
+    await vm.LoadAsync(); await vm.AuditImportTask;
+    var run = vm.PrepareShuttleCommand.ExecuteAsync();
+    await shuttle.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    vm.CancelOperationCommand.Execute(null); await run;
+    Assert((string)AuditTests.Scalar(paths, "SELECT status FROM jobs")! == "canceled", "Canceled job was not persisted as canceled.");
+    Assert(AuditTests.Scalar(paths, "SELECT completed_utc FROM jobs") is string, "Canceled job has no completion time.");
+}
+
+static async Task AuditRecordsBackupAndPreview()
+{
+    var paths = AuditTests.Paths(); var profile = ValidProfile();
+    profile.SourcePath = paths.RootDirectory; profile.DryRun = false;
+    profile.Target.Path = Path.Combine(paths.RootDirectory, "..", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(profile.Target.Path);
+    var runner = new FakeProcessRunner(new(0, "Done", ""));
+    var vm = CreateMainWindowViewModel([profile], processRunner: runner, audit: new AuditService(paths));
+    await vm.LoadAsync(); await vm.AuditImportTask;
+    await vm.RunNowCommand.ExecuteAsync(); await vm.PreviewDryRunCommand.ExecuteAsync();
+    Assert(Convert.ToInt64(AuditTests.Scalar(paths, "SELECT COUNT(*) FROM jobs WHERE status='succeeded' AND process_exit_code=0")) == 2, "Missing app outcomes.");
+    Assert(Convert.ToInt64(AuditTests.Scalar(paths, "SELECT COUNT(DISTINCT operation) FROM jobs")) == 2, "Preview not distinguished from backup.");
+    Assert(Convert.ToInt64(AuditTests.Scalar(paths, "SELECT COUNT(DISTINCT path) FROM job_artifacts WHERE kind='log'")) == 2, "App runs share a log path.");
+}
 
 static Task RelayCommandExecutesWhenAllowed()
 {
@@ -3253,7 +3303,8 @@ static Replicator.Presentation.ViewModels.MainWindowViewModel CreateMainWindowVi
     IProcessRunner? processRunner = null,
     IShuttleService? shuttleService = null,
     FakeBitLockerStatusProvider? driveSecurityProvider = null,
-    FakeBitLockerStatusProvider? elevatedDriveSecurityProvider = null)
+    FakeBitLockerStatusProvider? elevatedDriveSecurityProvider = null,
+    AuditService? audit = null)
 {
     var root = Path.Combine(Environment.CurrentDirectory, "test-artifacts", Guid.NewGuid().ToString("N"));
     var paths = new ReplicatorPaths(root);
@@ -3274,7 +3325,7 @@ static Replicator.Presentation.ViewModels.MainWindowViewModel CreateMainWindowVi
         scheduledTasks ?? new FakeScheduledTaskService(),
         taskInventoryService ?? new FakeScheduledTaskInventoryService(),
         folderPicker ?? new FakeFolderPicker(),
-        confirmation ?? new FakeUserConfirmation());
+        confirmation ?? new FakeUserConfirmation(), audit);
 }
 
 sealed class FakeProfileStore(IReadOnlyList<BackupProfile> profiles) : IProfileStore
