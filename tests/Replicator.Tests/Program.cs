@@ -127,6 +127,7 @@ if (Environment.GetEnvironmentVariable("REPLICATOR_LONG_SHUTTLE_SMOKE") == "1")
 }
 
 var failures = 0;
+var skipped = 0;
 
 foreach (var (name, test) in tests)
 {
@@ -134,6 +135,11 @@ foreach (var (name, test) in tests)
     {
         await test();
         Console.WriteLine($"PASS {name}");
+    }
+    catch (PlatformSkipException)
+    {
+        skipped++;
+        Console.WriteLine($"SKIP {name}");
     }
     catch (Exception exception)
     {
@@ -149,8 +155,11 @@ if (failures > 0)
     return 1;
 }
 
-Console.WriteLine($"{tests.Count} test(s) passed.");
+Console.WriteLine($"{tests.Count - skipped} test(s) passed, {skipped} test(s) skipped.");
 return 0;
+
+static Func<Task> WindowsOnly(Func<Task> test) => () =>
+    OperatingSystem.IsWindows() ? test() : throw new PlatformSkipException();
 
 static async Task AuditFailureDoesNotBlockBackup()
 {
@@ -3327,6 +3336,8 @@ static Replicator.Presentation.ViewModels.MainWindowViewModel CreateMainWindowVi
         folderPicker ?? new FakeFolderPicker(),
         confirmation ?? new FakeUserConfirmation(), audit);
 }
+
+sealed class PlatformSkipException : Exception;
 
 sealed class FakeProfileStore(IReadOnlyList<BackupProfile> profiles) : IProfileStore
 {
