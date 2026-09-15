@@ -1,0 +1,68 @@
+name: tests
+
+# Runs the test harness on Linux. This is only possible because the Windows-only tests are gated
+# behind PlatformGate.WindowsOnly - before that, eight tests failed on any non-Windows host by
+# shelling out to powershell.exe.
+#
+# Deliberately does NOT build Replicator.sln: src/Replicator.App targets net10.0-windows with WinUI
+# and cannot build on Linux. The test project pulls in Core and Presentation through project
+# references, so building it covers everything that is cross-platform.
+#
+# The harness is a hand-rolled console runner, not a test-framework adapter, so `dotnet test` finds
+# nothing and exits 0 regardless - a check that cannot fail. It must be invoked with `dotnet run`,
+# which exits non-zero when any test fails.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: harness (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore tests/Replicator.Tests/Replicator.Tests.csproj
+
+      - name: Build
+        run: dotnet build tests/Replicator.Tests/Replicator.Tests.csproj --no-restore --nologo
+
+      - name: Run harness
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet run --project tests/Replicator.Tests/Replicator.Tests.csproj --no-build --nologo | tee harness.log
+
+      - name: Assert tests actually ran
+        shell: bash
+        # A gate that skipped everywhere would still exit 0 with no failures, so the previous step
+        # alone cannot distinguish "all green" from "nothing ran". Assert a floor on real passes.
+        # 105 pass on Linux today and the 8 gated ones skip; if a future change quietly gates more,
+        # this fails instead of going quietly green.
+        run: |
+          passed=$(grep -c '^PASS ' harness.log || true)
+          skipped=$(grep -c '^SKIP ' harness.log || true)
+          echo "passed=$passed skipped=$skipped"
+          if [ "$passed" -lt 105 ]; then
+            echo "::error::only $passed tests passed on Linux; expected at least 105"
+            exit 1
+          fi
