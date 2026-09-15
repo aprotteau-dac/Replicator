@@ -18,7 +18,7 @@ using Replicator.Presentation.State;
 
 var tests = new List<(string Name, Func<Task> Test)>
 {
-    ("validator rejects destinations under the source tree", ValidatorRejectsNestedDestination),
+    ("validator rejects destinations under the source tree", PlatformGate.WindowsOnly(ValidatorRejectsNestedDestination)),
     ("script generator emits robocopy dry-run script", ScriptGeneratorEmitsDryRunScript),
     ("script generator emits target preflight status", ScriptGeneratorEmitsTargetPreflightStatus),
     ("script generator writes hidden scheduled task launcher", ScriptGeneratorWritesHiddenScheduledTaskLauncher),
@@ -61,8 +61,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("refresh status updates task fields and action surface", RefreshStatusUpdatesTaskFieldsAndActionSurface),
     ("review task inventory opens rows or reports none", ReviewTaskInventoryOpensRowsOrReportsNone),
     ("repair selected inventory task installs profile task", RepairSelectedInventoryTaskInstallsProfileTask),
-    ("main window view model marks drive security permission required for elevation", MainWindowViewModelMarksDriveSecurityPermissionRequiredForElevation),
-    ("check drive security as admin refreshes selected profile elevation state", CheckDriveSecurityAsAdminRefreshesSelectedProfileElevationState),
+    ("main window view model marks drive security permission required for elevation", PlatformGate.WindowsOnly(MainWindowViewModelMarksDriveSecurityPermissionRequiredForElevation)),
+    ("check drive security as admin refreshes selected profile elevation state", PlatformGate.WindowsOnly(CheckDriveSecurityAsAdminRefreshesSelectedProfileElevationState)),
     ("prepare shuttle command runs dry run and reports result", PrepareShuttleCommandRunsDryRunAndReportsResult),
     ("depart shuttle command marks prepared payload ready", DepartShuttleCommandMarksPreparedPayloadReady),
     ("dock shuttle command reports no inbound changes", DockShuttleCommandReportsNoInboundChanges),
@@ -103,9 +103,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("powershell bitlocker provider maps access denied to permission required", PowerShellBitLockerProviderMapsAccessDeniedToPermissionRequired),
     ("drive security report treats permission required as a warning", DriveSecurityReportTreatsPermissionRequiredAsWarning),
     ("drive security report marks permission required checks as elevation ready", DriveSecurityReportMarksPermissionRequiredChecksAsElevationReady),
-    ("drive security cache warms unique roots across profiles", DriveSecurityCacheWarmsUniqueRootsAcrossProfiles),
-    ("drive security cache refreshes selected profile roots only", DriveSecurityCacheRefreshesSelectedProfileRootsOnly),
-    ("drive security cache preserves unknown check failure reason", DriveSecurityCachePreservesUnknownCheckFailureReason),
+    ("drive security cache warms unique roots across profiles", PlatformGate.WindowsOnly(DriveSecurityCacheWarmsUniqueRootsAcrossProfiles)),
+    ("drive security cache refreshes selected profile roots only", PlatformGate.WindowsOnly(DriveSecurityCacheRefreshesSelectedProfileRootsOnly)),
+    ("drive security cache preserves unknown check failure reason", PlatformGate.WindowsOnly(DriveSecurityCachePreservesUnknownCheckFailureReason)),
     ("elevated bitlocker provider launches encoded admin helper and parses result file", ElevatedBitLockerProviderLaunchesEncodedAdminHelperAndParsesResultFile),
     ("elevated bitlocker encoded command runs helper script", ElevatedBitLockerEncodedCommandRunsHelperScript),
     ("elevated bitlocker provider batches multiple roots into one admin launch", ElevatedBitLockerProviderBatchesMultipleRootsIntoOneAdminLaunch),
@@ -113,7 +113,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("elevated bitlocker helper script writes output for startup failures", ElevatedBitLockerHelperScriptWritesOutputForStartupFailures),
     ("elevated bitlocker provider times out hung admin helper", ElevatedBitLockerProviderTimesOutHungAdminHelper),
     ("elevated bitlocker provider treats canceled admin prompt as permission required", ElevatedBitLockerProviderTreatsCanceledAdminPromptAsPermissionRequired),
-    ("profile drive security checker summarizes bitlocker posture", ProfileDriveSecurityCheckerSummarizesBitLockerPosture)
+    ("profile drive security checker summarizes bitlocker posture", PlatformGate.WindowsOnly(ProfileDriveSecurityCheckerSummarizesBitLockerPosture))
 };
 
 tests.AddRange(AuditTests.Cases);
@@ -157,9 +157,6 @@ if (failures > 0)
 
 Console.WriteLine($"{tests.Count - skipped} test(s) passed, {skipped} test(s) skipped.");
 return 0;
-
-static Func<Task> WindowsOnly(Func<Task> test) => () =>
-    OperatingSystem.IsWindows() ? test() : throw new PlatformSkipException();
 
 static async Task AuditFailureDoesNotBlockBackup()
 {
@@ -3338,6 +3335,12 @@ static Replicator.Presentation.ViewModels.MainWindowViewModel CreateMainWindowVi
 }
 
 sealed class PlatformSkipException : Exception;
+
+internal static class PlatformGate
+{
+    public static Func<Task> WindowsOnly(Func<Task> test) => () =>
+        OperatingSystem.IsWindows() ? test() : throw new PlatformSkipException();
+}
 
 sealed class FakeProfileStore(IReadOnlyList<BackupProfile> profiles) : IProfileStore
 {
