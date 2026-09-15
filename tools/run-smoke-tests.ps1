@@ -12,7 +12,13 @@ $env:DOTNET_CLI_HOME = Join-Path $repoRoot '.dotnet-home'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 
 if (-not $SkipBuild) {
-    dotnet build Replicator.sln
+    if ($IsWindows) {
+        dotnet build Replicator.sln
+    }
+    else {
+        # Replicator.App targets net10.0-windows (WinUI) and cannot build off Windows.
+        dotnet build tests/Replicator.Tests/Replicator.Tests.csproj
+    }
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
