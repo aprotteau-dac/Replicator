@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Replicator.Core;
+using Replicator.Core.Audit;
 using Replicator.Core.Availability;
 using Replicator.Core.Execution;
 using Replicator.Core.Models;
@@ -15,6 +16,9 @@ namespace Replicator.Presentation.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
+    private readonly AuditService _audit;
+    private readonly ReplicatorPaths _paths;
+    public Task AuditImportTask { get; private set; } = Task.CompletedTask;
     private readonly IProfileStore _profileStore;
     private readonly ProfileAvailabilityChecker _availabilityChecker;
     private readonly IBitLockerStatusProvider _driveSecurityProvider;
@@ -63,9 +67,12 @@ public sealed class MainWindowViewModel : ObservableObject
         IScheduledTaskService scheduledTasks,
         IScheduledTaskInventoryService taskInventoryService,
         Replicator.Presentation.Services.IFolderPicker folderPicker,
-        Replicator.Presentation.Services.IUserConfirmation confirmation)
+        Replicator.Presentation.Services.IUserConfirmation confirmation,
+        AuditService? audit = null)
     {
         paths.EnsureCreated();
+        _paths = paths;
+        _audit = audit ?? new AuditService(paths);
         _profileStore = profileStore;
         _availabilityChecker = availabilityChecker;
         _driveSecurityProvider = driveSecurityProvider;
@@ -90,25 +97,25 @@ public sealed class MainWindowViewModel : ObservableObject
         InstallTaskCommand = new AsyncCommand(InstallTaskAsync, () => SelectedProfile is not null && !IsBusy);
         PreviewDryRunCommand = new AsyncCommand(PreviewDryRunAsync, () => SelectedProfile is not null && !IsBusy);
         RunNowCommand = new AsyncCommand(RunNowAsync, () => SelectedProfile is not null && !IsBusy);
-        EnableTaskCommand = new AsyncCommand(() => ChangeTaskAsync(profile => _scheduledTasks.EnableAsync(profile)), () => SelectedProfile is not null && !IsBusy);
-        DisableTaskCommand = new AsyncCommand(() => ChangeTaskAsync(profile => _scheduledTasks.DisableAsync(profile)), () => SelectedProfile is not null && !IsBusy);
-        RemoveTaskCommand = new AsyncCommand(() => ChangeTaskAsync(profile => _scheduledTasks.DeleteAsync(profile)), () => SelectedProfile is not null && !IsBusy);
+        EnableTaskCommand = new AsyncCommand(() => ChangeTaskAsync("enable", profile => _scheduledTasks.EnableAsync(profile)), () => SelectedProfile is not null && !IsBusy);
+        DisableTaskCommand = new AsyncCommand(() => ChangeTaskAsync("disable", profile => _scheduledTasks.DisableAsync(profile)), () => SelectedProfile is not null && !IsBusy);
+        RemoveTaskCommand = new AsyncCommand(() => ChangeTaskAsync("remove", profile => _scheduledTasks.DeleteAsync(profile)), () => SelectedProfile is not null && !IsBusy);
         StartScheduledTaskCommand = new AsyncCommand(StartScheduledTaskAsync, () => SelectedProfile is not null && !IsBusy);
         RefreshStatusCommand = new AsyncCommand(RefreshStatusAsync, () => SelectedProfile is not null && !IsBusy);
         ReviewTaskInventoryCommand = new AsyncCommand(ReviewTaskInventoryAsync, () => !IsBusy);
         RepairSelectedInventoryTaskCommand = new AsyncCommand(RepairSelectedInventoryTaskAsync, () => SelectedProfile is not null && !IsBusy);
         CheckDriveSecurityAsAdminCommand = new AsyncCommand(CheckDriveSecurityAsAdminAsync, () => SelectedProfile is not null && !IsBusy);
         PrepareShuttleCommand = new AsyncCommand(
-            () => RunShuttleAsync((profile, progress, cancellationToken) => _shuttleService.PrepareAsync(profile, progress, cancellationToken)),
+            () => RunShuttleAsync("prepare", (profile, progress, cancellationToken) => _shuttleService.PrepareAsync(profile, progress, cancellationToken)),
             () => SelectedProfile is not null && !IsBusy);
         DepartShuttleCommand = new AsyncCommand(
-            () => RunShuttleAsync((profile, progress, cancellationToken) => _shuttleService.DepartAsync(profile, progress, cancellationToken)),
+            () => RunShuttleAsync("depart", (profile, progress, cancellationToken) => _shuttleService.DepartAsync(profile, progress, cancellationToken)),
             () => SelectedProfile is not null && !IsBusy);
         DockShuttleCommand = new AsyncCommand(
-            () => RunShuttleAsync((profile, progress, cancellationToken) => _shuttleService.DockAsync(profile, progress, cancellationToken)),
+            () => RunShuttleAsync("dock", (profile, progress, cancellationToken) => _shuttleService.DockAsync(profile, progress, cancellationToken)),
             () => SelectedProfile is not null && !IsBusy);
         ReceiveShuttleCommand = new AsyncCommand(
-            () => RunShuttleAsync((profile, progress, cancellationToken) => _shuttleService.ReceiveAsync(profile, progress, cancellationToken)),
+            () => RunShuttleAsync("receive", (profile, progress, cancellationToken) => _shuttleService.ReceiveAsync(profile, progress, cancellationToken)),
             () => SelectedProfile is not null && !IsBusy);
         CancelOperationCommand = new RelayCommand(CancelOperation, () => CanCancel);
     }
@@ -212,6 +219,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task LoadAsync()
     {
+        await _audit.InitializeAsync();
+        await _audit.EventAsync(new("app.started", "Replicator started."));
         Profiles.Clear();
 
         foreach (var profile in await _profileStore.LoadAsync())
@@ -225,6 +234,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         SelectedProfile = Profiles[0];
+        StartAuditImport();
         if (SelectedProfile is not null)
         {
             await RefreshDriveSecurityAsync(SelectedProfile);
@@ -295,8 +305,10 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var taskResult = await _scheduledTasks.DeleteAsync(profile);
+        var taskResult = await AuditTaskAsync("remove", profile, () => _scheduledTasks.DeleteAsync(profile));
         await _profileStore.DeleteAsync(profile.Id);
+        await _audit.DetachProfileAsync(profile.Id);
+        await _audit.EventAsync(new("profile.deleted", "Profile deleted.", "profile", ProfileId: profile.Id));
         Profiles.Remove(profile);
 
         if (Profiles.Count == 0)
@@ -335,7 +347,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await _profileStore.UpsertAsync(profile);
+        await SaveProfileAsync(profile);
         HeaderText = profile.Name;
         ShowStatus("Profile saved.", succeeded: true);
         await RefreshTaskInventoryAsync();
@@ -348,8 +360,8 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await _profileStore.UpsertAsync(profile);
-        var script = await _scriptGenerator.WriteAsync(profile);
+        await SaveProfileAsync(profile);
+        var script = await WriteScriptAsync(profile);
         AppendOutput($"Generated script: {script.Path}");
         ShowStatus("Script generated.", succeeded: true);
     }
@@ -370,12 +382,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task PreviewDryRunAsync()
     {
-        if (!TryApplyForm(out var profile))
+        await RunBusyAsync("Previewing profile...", async _ =>
         {
-            return;
-        }
-
-        await RunScriptAsync(profile, forceDryRun: true);
+            if (TryApplyForm(out var profile)) await RunScriptAsync(profile, forceDryRun: true);
+        });
     }
 
     private async Task RunNowAsync()
@@ -392,6 +402,7 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     private async Task RunShuttleAsync(
+        string operationName,
         Func<BackupProfile, IProgress<ShuttleOperationProgress>, CancellationToken, Task<ShuttleOperationResult>> operation)
     {
         await RunBusyAsync("Running shuttle operation...", async cancellationToken =>
@@ -401,32 +412,44 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            await _profileStore.UpsertAsync(profile);
-            ShowAvailability(_availabilityChecker.Check(profile));
-            var acceptProgress = true;
-            var progress = new Progress<ShuttleOperationProgress>(progress =>
+            var job = AuditJob.Start(profile, "shuttle_" + operationName);
+            await _audit.SaveJobAsync(job);
+            try
             {
-                if (acceptProgress)
+                await SaveProfileAsync(profile);
+                ShowAvailability(_availabilityChecker.Check(profile));
+                var acceptProgress = true;
+                var progress = new Progress<ShuttleOperationProgress>(progress =>
                 {
-                    ShowShuttleProgress(progress);
-                }
-            });
-            var result = await Task.Run(() => operation(profile, progress, cancellationToken), cancellationToken);
-            acceptProgress = false;
-            OutputText = result.ToDisplayString();
-            ShowStatus(result.Message, result.Succeeded);
-            RecalculateActionSurface();
+                    if (acceptProgress)
+                    {
+                        ShowShuttleProgress(progress);
+                    }
+                });
+                ShuttleOperationResult result;
+                try { result = await Task.Run(() => operation(profile, progress, cancellationToken), cancellationToken); }
+                finally { acceptProgress = false; }
+                await _audit.CompleteShuttleAsync(job, result);
+                OutputText = result.ToDisplayString();
+                ShowStatus(result.Message, result.Succeeded);
+                RecalculateActionSurface();
+            }
+            catch (Exception exception)
+            {
+                await CompleteFailedJobAsync(job, exception);
+                throw;
+            }
         }, canCancel: true);
     }
 
     private async Task<TaskOperationResult> InstallOrUpdateTaskForProfileAsync(BackupProfile profile)
     {
-        await _profileStore.UpsertAsync(profile);
-        var script = await _scriptGenerator.WriteAsync(profile);
-        return await _scheduledTasks.InstallOrUpdateAsync(profile, script.Path);
+        await SaveProfileAsync(profile);
+        var script = await WriteScriptAsync(profile);
+        return await AuditTaskAsync("install_update", profile, () => _scheduledTasks.InstallOrUpdateAsync(profile, script.Path));
     }
 
-    private async Task ChangeTaskAsync(Func<BackupProfile, Task<TaskOperationResult>> operation)
+    private async Task ChangeTaskAsync(string action, Func<BackupProfile, Task<TaskOperationResult>> operation)
     {
         var profile = SelectedProfile;
         if (profile is null)
@@ -435,7 +458,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var result = await operation(profile);
+        var result = await AuditTaskAsync(action, profile, () => operation(profile));
         AppendOutput(result.Output);
         ShowStatus(result.Message, result.Succeeded);
         await RefreshTaskStatusAsync(profile);
@@ -452,6 +475,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         var expectedScriptPath = _scriptGenerator.ScriptPathFor(profile);
+        await _audit.EventAsync(new("task.start_requested", "Scheduled task start requested.", "scheduling", ProfileId: profile.Id));
         var snapshot = await _scheduledTasks.QueryAsync(profile, expectedScriptPath);
         _currentTaskSnapshot = snapshot;
         RecalculateActionSurface();
@@ -470,13 +494,14 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var result = await _scheduledTasks.RunAsync(profile);
+        var result = await AuditTaskAsync("start", profile, () => _scheduledTasks.RunAsync(profile));
         AppendOutput(result.Output);
         ShowStatus(result.Succeeded ? "Scheduled task started. Waiting for status..." : result.Message, result.Succeeded);
     }
 
     private async Task RefreshStatusAsync()
     {
+        StartAuditImport();
         var profile = SelectedProfile;
         if (profile is null)
         {
@@ -519,6 +544,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        await _audit.EventAsync(new("task.repair_requested", "Scheduled task repair requested.", "scheduling", ProfileId: profile.Id));
         var result = await InstallOrUpdateTaskForProfileAsync(profile);
         AppendOutput(result.Output);
         ShowStatus(result.Message, result.Succeeded);
@@ -585,10 +611,14 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            ShowDriveSecurity(_driveSecurityCache.Report(profile));
+            var report = _driveSecurityCache.Report(profile);
+            ShowDriveSecurity(report);
+            if (report.Items.Any(item => item.State is DriveSecurityState.Unknown or DriveSecurityState.PermissionRequired))
+                await _audit.EventAsync(new("security.check_failed", report.Summary, "security", "warning", report.ToDisplayString(), ProfileId: profile.Id));
         }
         catch (Exception exception)
         {
+            await _audit.EventAsync(new("security.check_failed", exception.Message, "security", "warning", ProfileId: profile.Id));
             if (SelectedProfile?.Id != profileId)
             {
                 return;
@@ -676,42 +706,122 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task RunScriptAsync(BackupProfile profile, bool forceDryRun)
     {
-        var availability = _availabilityChecker.Check(profile);
-        ShowAvailability(availability);
-        if (availability.HasErrors)
+        var job = AuditJob.Start(profile, forceDryRun || profile.DryRun ? "dry_run" : "backup");
+        var logPath = Path.Combine(_paths.LogsDirectory, $"{PowerShellScriptGenerator.ProfileSlug(profile)}-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{job.Id}.log");
+        job.Artifacts.Add(new("log", logPath));
+        await _audit.SaveJobAsync(job);
+        try
         {
-            OutputText = availability.ToDisplayString();
-            ShowStatus(availability.Summary, succeeded: false);
-            return;
-        }
+            var availability = _availabilityChecker.Check(profile);
+            ShowAvailability(availability);
+            if (availability.HasErrors)
+            {
+                OutputText = availability.ToDisplayString();
+                ShowStatus(availability.Summary, succeeded: false);
+                job.Status = "failed";
+                job.CompletedUtc = DateTimeOffset.UtcNow;
+                job.Error = availability.ToDisplayString();
+                await _audit.SaveJobAsync(job);
+                return;
+            }
 
+            await SaveProfileAsync(profile);
+            var script = await WriteScriptAsync(profile);
+            job.Artifacts.Add(new("script", script.Path));
+            await _audit.SaveJobAsync(job);
+            var arguments = new List<string>
+            {
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                script.Path,
+                "-RunLogPath",
+                logPath
+            };
+
+            if (forceDryRun)
+            {
+                arguments.Add("-DryRun");
+            }
+
+            var result = await _processRunner.RunAsync("powershell.exe", arguments);
+            job.ProcessExitCode = result.ExitCode;
+            job.Status = result.Succeeded ? "succeeded" : "failed";
+            job.CompletedUtc = DateTimeOffset.UtcNow;
+            job.Error = result.Succeeded ? "" : result.StandardError;
+            job.Summary = result.Succeeded ? "Process completed." : $"Process failed with exit code {result.ExitCode}.";
+            await _audit.CompleteBackupAsync(job);
+            AppendOutput(result.StandardOutput);
+            AppendOutput(result.StandardError);
+            ShowLatestRun(profile, preserveExistingOutput: true);
+            RecalculateActionSurface();
+
+            var dryRunActive = forceDryRun || profile.DryRun;
+            var action = dryRunActive ? "Dry run" : "Run";
+            ShowStatus(
+                result.Succeeded ? $"{action} completed. Latest log is shown below." : $"{action} failed with exit code {result.ExitCode}.",
+                result.Succeeded);
+        }
+        catch (Exception exception)
+        {
+            await CompleteFailedJobAsync(job, exception);
+            throw;
+        }
+    }
+
+    private async Task CompleteFailedJobAsync(AuditJob job, Exception exception)
+    {
+        job.Status = exception is OperationCanceledException ? "canceled" : "failed";
+        job.CompletedUtc = DateTimeOffset.UtcNow;
+        job.Error = exception.Message;
+        await _audit.SaveJobAsync(job);
+    }
+
+    private async Task SaveProfileAsync(BackupProfile profile)
+    {
         await _profileStore.UpsertAsync(profile);
-        var script = await _scriptGenerator.WriteAsync(profile);
-        var arguments = new List<string>
-        {
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            script.Path
-        };
+        await _audit.EventAsync(new("profile.saved", "Profile saved.", "profile", ProfileId: profile.Id));
+    }
 
-        if (forceDryRun)
+    private async Task<GeneratedScript> WriteScriptAsync(BackupProfile profile)
+    {
+        try
         {
-            arguments.Add("-DryRun");
+            var script = await _scriptGenerator.WriteAsync(profile);
+            await _audit.EventAsync(new("script.generated", "Script generated.", "scripting", Details: script.Path, ProfileId: profile.Id));
+            return script;
         }
+        catch (Exception exception)
+        {
+            await _audit.EventAsync(new("script.failed", exception.Message, "scripting", "error", ProfileId: profile.Id));
+            throw;
+        }
+    }
 
-        var result = await _processRunner.RunAsync("powershell.exe", arguments);
-        AppendOutput(result.StandardOutput);
-        AppendOutput(result.StandardError);
-        ShowLatestRun(profile, preserveExistingOutput: true);
-        RecalculateActionSurface();
+    private async Task<TaskOperationResult> AuditTaskAsync(string action, BackupProfile profile, Func<Task<TaskOperationResult>> operation)
+    {
+        await _audit.EventAsync(new($"task.{action}_attempt", "Scheduled task action requested.", "scheduling", ProfileId: profile.Id));
+        try
+        {
+            var result = await operation();
+            await _audit.EventAsync(new($"task.{action}_completed", result.Message, "scheduling",
+                result.Succeeded ? "info" : "warning", result.Output, ProfileId: profile.Id));
+            return result;
+        }
+        catch (Exception exception)
+        {
+            await _audit.EventAsync(new($"task.{action}_failed", exception.Message, "scheduling", "error", ProfileId: profile.Id));
+            throw;
+        }
+    }
 
-        var dryRunActive = forceDryRun || profile.DryRun;
-        var action = dryRunActive ? "Dry run" : "Run";
-        ShowStatus(
-            result.Succeeded ? $"{action} completed. Latest log is shown below." : $"{action} failed with exit code {result.ExitCode}.",
-            result.Succeeded);
+    private void StartAuditImport()
+    {
+        // Copy on the UI thread: the importer must not enumerate a changing ObservableCollection/profile.
+        var snapshot = System.Text.Json.JsonSerializer.Deserialize<List<BackupProfile>>(
+            System.Text.Json.JsonSerializer.Serialize(Profiles))!;
+        AuditImportTask = _audit.ImportAsync(snapshot);
     }
 
     private void ShowLatestRun(BackupProfile profile, bool preserveExistingOutput = false)

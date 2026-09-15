@@ -13,6 +13,10 @@ public sealed class ReplicatorPaths
 
     public string RootDirectory { get; }
 
+    public string DatabaseFile => Path.Combine(RootDirectory, "replicator.db");
+
+    public string FallbackLogFile => Path.Combine(LogsDirectory, "system-events-fallback.log");
+
     public string ProfilesFile { get; }
 
     public string MachineIdentityFile { get; }

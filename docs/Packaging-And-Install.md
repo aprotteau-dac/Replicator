@@ -76,10 +76,14 @@ Skip all shortcuts:
 .\uninstall-replicator.ps1
 ```
 
-Remove profile/script/log data too:
+Remove profile/script/log data and the local audit database too:
 
 ```powershell
 .\uninstall-replicator.ps1 -RemoveAppData
 ```
+
+Default uninstall preserves `%LOCALAPPDATA%\Replicator`. `-RemoveAppData` removes that directory, including `replicator.db`, logs, and rotated `system-events-fallback` diagnostics. The database contains local audit metadata (including profile names and filesystem paths); full verbose logs remain separate linked files. Close the app before removing or backing up this data.
+
+The self-contained package includes the Microsoft.Data.Sqlite managed assemblies and native SQLite runtime. SQLite is not required by standalone generated Task Scheduler scripts.
 
 This is a lightweight installer path, not an MSI/MSIX yet.

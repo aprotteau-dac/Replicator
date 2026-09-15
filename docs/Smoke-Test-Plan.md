@@ -4,6 +4,8 @@ This plan is the repeatable pre-release smoke pass for Replicator. It focuses on
 
 ## Automated Gate
 
+The automated audit cases use temporary data directories and include a real generated PowerShell dry run against a nonexistent target; they do not install scheduled tasks.
+
 Run from the repository root:
 
 ```powershell
@@ -14,12 +16,17 @@ Expected result:
 
 ```text
 Build succeeded.
-91 test(s) passed.
+All tests passed (the runner prints the current count).
 Replicator smoke gates passed.
 ```
 
 This gate covers:
 
+- audit schema initialization, unsupported-schema handling, and job lifecycle persistence
+- historical imports, exact-log status enrichment, deduplication, orphaned history, and uncertain outcomes
+- independent malformed/locked artifact skips, atomic batch rollback, and retry
+- audit event correlations, bounded fallback rotation/recovery, and shuttle manifest metadata
+- view-model proof that database failure does not block backup and cancellation persists as canceled
 - profile validation
 - script generation
 - robocopy log parsing
